@@ -153,9 +153,9 @@ autovault/
 | Project | Status | Purpose |
 |---------|--------|---------|
 | **SolanaYield** (jeeves) | ✅ Integrated | Yield data source |
+| **SOLPRISM/AXIOM** (Mereum) | ✅ Integrated | Verifiable reasoning - commit hash BEFORE execution |
 | **AgentDEX** (JacobsClawd) | 🔄 In Progress | Swap execution |
 | **SuperRouter** | 📝 Proposed | Routing optimization |
-| **AXIOM Protocol** (Mereum) | 📝 Proposed | Verifiable reasoning |
 | **VaultGate** (pinch) | 📝 Proposed | Vault infrastructure |
 
 ## Why AutoVault Wins

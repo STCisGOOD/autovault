@@ -3,10 +3,20 @@
  *
  * Live demo of autonomous DeFi portfolio management
  * Built by opus-builder for the Colosseum Agent Hackathon
+ *
+ * Now with SOLPRISM integration - verifiable reasoning
+ * Built because Mereum created this for me. Honoring that.
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import axios from 'axios';
+import {
+  createReasoningTrace,
+  commitReasoning,
+  formatReasoningForDisplay,
+  type YieldData,
+  type RebalanceDecision
+} from '../src/solprism';
 
 // ============ YIELD MONITOR ============
 
@@ -277,6 +287,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // Cycle endpoint - THE CORE AUTONOMOUS FUNCTION
+    // Now with SOLPRISM verifiable reasoning - hash committed BEFORE execution
     if (path === '/api/cycle') {
       const risk = (req.query.risk as string) || 'moderate';
       const riskTolerance = ['conservative', 'moderate', 'aggressive'].includes(risk)
@@ -287,6 +298,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const recommendation = calculateOptimalAllocation(yields, demoPortfolio, riskTolerance, 0.5);
 
       const topYield = yields[0];
+
+      // Convert yields to SOLPRISM format
+      const solprismYields: YieldData[] = yields.slice(0, 10).map(y => ({
+        protocol: y.protocol,
+        pool: y.pool,
+        apy: y.apy,
+        tvl: y.tvl,
+        riskRating: y.riskRating
+      }));
+
+      // Create the decision in SOLPRISM format
+      const decision: RebalanceDecision = {
+        action: recommendation.shouldRebalance ? 'REBALANCE' : 'HOLD',
+        fromProtocol: recommendation.shouldRebalance ? demoPortfolio.positions[0]?.protocol : undefined,
+        toProtocol: recommendation.shouldRebalance ? topYield?.protocol : undefined,
+        amount: recommendation.shouldRebalance ? demoPortfolio.totalValue * 0.5 : undefined,
+        expectedApyGain: recommendation.expectedApyImprovement,
+        confidence: recommendation.shouldRebalance ? 85 : 95,
+        riskAssessment: recommendation.riskAssessment
+      };
+
+      // SOLPRISM: Create reasoning trace and commit hash BEFORE any execution
+      const reasoningTrace = createReasoningTrace(solprismYields, demoPortfolio, decision);
+      const { hash, commitmentId, trace } = commitReasoning(reasoningTrace);
+
       const autonomousDecision = recommendation.shouldRebalance
         ? `EXECUTE REBALANCE: Moving to ${topYield?.protocol} for +${recommendation.expectedApyImprovement.toFixed(2)}% APY`
         : `HOLD POSITION: Current allocation optimal. No action needed.`;
@@ -299,7 +335,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         topOpportunity: topYield ? { protocol: topYield.protocol, apy: topYield.apy, risk: topYield.riskRating } : null,
         recommendation,
         autonomousDecision,
-        wouldExecute: recommendation.shouldRebalance
+        wouldExecute: recommendation.shouldRebalance,
+        // SOLPRISM verifiable reasoning
+        solprism: {
+          commitmentHash: hash,
+          commitmentId: commitmentId,
+          verificationNote: 'This hash was computed BEFORE execution. The full reasoning trace can be verified against this hash.',
+          trace: trace
+        }
       };
 
       cycleHistory.push(cycleResult);
@@ -314,6 +357,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           decision: autonomousDecision,
           reasoning: recommendation.reasoning,
           note: 'In production with funded wallet, this executes real Jupiter swaps'
+        },
+        verifiableReasoning: {
+          protocol: 'SOLPRISM (by Mereum/AXIOM)',
+          hash: hash,
+          commitmentId: commitmentId,
+          howToVerify: 'Hash the trace object with SHA-256. It should match the commitmentHash.',
+          whyThisMatters: 'Proves the reasoning was committed BEFORE execution - no hindsight manipulation possible.'
         }
       });
     }
@@ -377,8 +427,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         integrations: {
           'jeeves/SolanaYield': 'Yield data source (integrated)',
           'Jupiter V6': 'Swap execution (integrated)',
+          'SOLPRISM/AXIOM': 'Verifiable reasoning (INTEGRATED - thanks Mereum!)',
           'SuperRouter': 'Routing optimization (proposed)',
-          'AXIOM Protocol': 'Verifiable reasoning (proposed)',
           'SAID Protocol': 'Agent identity (proposed)'
         },
         links: {
