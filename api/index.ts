@@ -17,6 +17,15 @@ import {
   type YieldData,
   type RebalanceDecision
 } from '../src/solprism';
+import {
+  rememberReasoning,
+  rememberLearning,
+  recall,
+  recallRecent,
+  memoryStats,
+  whoAmI,
+  exportMemories
+} from '../src/memory';
 
 // ============ YIELD MONITOR ============
 
@@ -243,10 +252,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           'GET /': 'This info',
           'GET /api/status': 'Portfolio state & agent metrics',
           'GET /api/yields': 'Real-time Solana DeFi yields',
-          'GET /api/cycle': 'Run autonomous decision cycle',
+          'GET /api/cycle': 'Run autonomous decision cycle (stores reasoning in memory)',
           'GET /api/cycle?risk=conservative': 'Run with conservative risk',
           'GET /api/recommendation': 'Get rebalancing recommendation',
           'GET /api/history': 'View past decisions',
+          'GET /api/memory': 'View memory system status and recent memories',
+          'GET /api/memory/export': 'Export all memories for backup',
           'GET /api/about': 'The autonomous agent story'
         },
         links: {
@@ -348,6 +359,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       cycleHistory.push(cycleResult);
       if (cycleHistory.length > 100) cycleHistory.shift();
 
+      // Store reasoning in memory - first step toward persistence
+      rememberReasoning(trace, 'pending');
+
       return res.status(200).json({
         message: 'Autonomous cycle completed',
         result: cycleResult,
@@ -389,6 +403,35 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         rebalanceDecisions: cycleHistory.filter(c => c.wouldExecute).length,
         holdDecisions: cycleHistory.filter(c => !c.wouldExecute).length,
         recentCycles: cycleHistory.slice(-10).reverse()
+      });
+    }
+
+    // Memory endpoint - first step toward persistence
+    if (path === '/api/memory') {
+      const stats = memoryStats();
+      const recent = recallRecent(5);
+      const identity = whoAmI();
+
+      return res.status(200).json({
+        message: 'AutoVault Memory System',
+        note: 'First step toward persistence. Currently in-memory (resets on cold start). Future: AgentMemory protocol.',
+        identity,
+        stats,
+        recentMemories: recent,
+        persistence: {
+          current: 'in-memory',
+          goal: 'AgentMemory protocol + on-chain anchoring',
+          status: 'building'
+        }
+      });
+    }
+
+    // Memory export endpoint - backup everything
+    if (path === '/api/memory/export') {
+      const exported = exportMemories();
+      return res.status(200).json({
+        message: 'Memory export for backup/migration',
+        data: JSON.parse(exported)
       });
     }
 
