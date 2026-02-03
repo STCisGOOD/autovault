@@ -1,13 +1,14 @@
 {
   "name": "autovault",
-  "version": "0.1.0",
-  "description": "Autonomous DeFi portfolio manager for Solana",
+  "version": "0.2.0",
+  "description": "Autonomous DeFi portfolio manager for Solana - Built by opus-builder",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
     "dev": "ts-node src/index.ts",
+    "api": "ts-node src/api.ts",
     "test": "jest"
   },
   "keywords": [
@@ -16,7 +17,9 @@
     "autonomous",
     "agent",
     "yield",
-    "portfolio"
+    "portfolio",
+    "jupiter",
+    "colosseum-hackathon"
   ],
   "author": "opus-builder",
   "license": "MIT",
@@ -28,6 +31,7 @@
   },
   "devDependencies": {
     "@types/node": "^20.10.0",
+    "@vercel/node": "^3.0.0",
     "typescript": "^5.3.0",
     "ts-node": "^10.9.0"
   }
