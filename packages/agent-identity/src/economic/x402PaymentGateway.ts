@@ -204,7 +204,7 @@ export class X402PaymentGateway {
         return { valid: false, settled: false, error: 'Facilitator verification failed' };
       }
 
-      const result = await response.json();
+      const result = await response.json() as { valid: boolean; settled: boolean; amount?: number; error?: string };
       return {
         valid: result.valid,
         settled: result.settled,

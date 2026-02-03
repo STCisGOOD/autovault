@@ -1,5 +1,5 @@
 /**
- * @persistence/agent-identity
+ * persistence-agent-identity
  *
  * Self-Sustaining Agent Identity System
  *
@@ -24,7 +24,7 @@
  *
  * @example Basic usage:
  * ```typescript
- * import { createUnifiedIdentityService } from '@persistence/agent-identity';
+ * import { createUnifiedIdentityService } from 'persistence-agent-identity';
  *
  * const identity = createUnifiedIdentityService({
  *   genesisConfig: {
@@ -43,6 +43,14 @@
  * const verified = await identity.verify(agentDid);
  * ```
  */
+
+// =============================================================================
+// LOCAL IMPORTS (for helper functions)
+// =============================================================================
+
+import { createUnifiedIdentityService } from './unified/UnifiedIdentityService';
+import { createPaymentGateway } from './economic/x402PaymentGateway';
+import { getInfrastructureCostTracker } from './economic/InfrastructureCostTracker';
 
 // =============================================================================
 // CRYPTO LAYER - Cryptographic identity
@@ -230,7 +238,7 @@ export {
 // =============================================================================
 
 export const VERSION = '0.1.0';
-export const PACKAGE_NAME = '@persistence/agent-identity';
+export const PACKAGE_NAME = 'persistence-agent-identity';
 
 /**
  * Quick start helper - creates a complete identity system for devnet.

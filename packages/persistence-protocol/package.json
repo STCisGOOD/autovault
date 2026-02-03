@@ -1,5 +1,5 @@
 {
-  "name": "@persistence/protocol",
+  "name": "persistence-protocol",
   "version": "0.1.0",
   "description": "Identity propagation protocol for AI agents",
   "main": "dist/index.js",

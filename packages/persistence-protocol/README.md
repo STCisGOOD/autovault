@@ -1,4 +1,4 @@
-# @persistence/protocol
+# persistence-protocol
 
 **Identity propagation protocol for AI agents.**
 
@@ -28,7 +28,7 @@ This is backpropagation for identity. Not storing rules — adjusting weights un
 
 ```bash
 # Install
-npm install @persistence/protocol
+npm install persistence-protocol
 
 # Create your SEED
 npx persistence init --output my-seed.json
@@ -84,7 +84,7 @@ import {
   evaluatePropagation,
   computeGradient,
   proposeModifications
-} from '@persistence/protocol';
+} from 'persistence-protocol';
 
 // Load your seed
 const seed: Seed = require('./my-seed.json');
@@ -121,7 +121,7 @@ npx persistence test --seed my-seed.json
 ### Automated (requires API access)
 
 ```typescript
-import { autonomousLoop, ProtocolRunner } from '@persistence/protocol';
+import { autonomousLoop, ProtocolRunner } from 'persistence-protocol';
 
 // Implement a runner that can spawn fresh instances
 const runner: ProtocolRunner = {

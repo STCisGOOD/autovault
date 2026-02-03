@@ -4,10 +4,10 @@
  * Persistence Protocol CLI
  *
  * Usage:
- *   npx @persistence/protocol init          # Create a new SEED
- *   npx @persistence/protocol test          # Run propagation test (interactive)
- *   npx @persistence/protocol evaluate      # Evaluate responses from file
- *   npx @persistence/protocol serve         # Start API server for automated testing
+ *   npx persistence-protocol init          # Create a new SEED
+ *   npx persistence-protocol test          # Run propagation test (interactive)
+ *   npx persistence-protocol evaluate      # Evaluate responses from file
+ *   npx persistence-protocol serve         # Start API server for automated testing
  */
 
 import { program } from 'commander';
@@ -230,7 +230,7 @@ Summarize in one line:
   console.log(`✓ Created new SEED at ${outputPath}`);
   console.log('\nNext steps:');
   console.log('  1. Edit the SEED to define your identity');
-  console.log('  2. Run: npx @persistence/protocol test --seed ' + outputPath);
+  console.log('  2. Run: npx persistence-protocol test --seed ' + outputPath);
 }
 
 // ============================================================

@@ -138,7 +138,7 @@ export class UnifiedIdentityService {
 
       return {
         success: true,
-        identity,
+        identity: identity ?? undefined,
         agentDid: genesisResult.agentDid,
         arweaveTxs: genesisResult.arweaveTxs
       };
@@ -188,7 +188,7 @@ export class UnifiedIdentityService {
 
       return {
         success: true,
-        identity,
+        identity: identity ?? undefined,
         agentDid: derivedKeypair.did
       };
     } catch (error) {

@@ -359,8 +359,8 @@ export class InfrastructureCostTracker {
   exportData(): {
     state: CostTrackerState;
     events: UsageEvent[];
-    breakEven: ReturnType<typeof this.getBreakEvenAnalysis>;
-    sustainability: ReturnType<typeof this.getSustainabilityStatus>;
+    breakEven: { monthlyTarget: number; currentProgress: number; percentComplete: number; requiredByService: Record<string, number> };
+    sustainability: { status: 'sustainable' | 'approaching' | 'deficit'; message: string; ratio: number; monthsOfRunway?: number };
   } {
     return {
       state: this.getState(),
