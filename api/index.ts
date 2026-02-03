@@ -27,6 +27,8 @@ import {
   exportMemories
 } from '../src/memory';
 import { getPaymentStatus } from '../src/x402';
+import { calculateReputation, getReputationSummary } from '../src/reputation';
+import { recordHeartbeat, getHeartbeatStatus, incrementCycleCount, formatUptime } from '../src/heartbeat';
 
 // ============ YIELD MONITOR ============
 
@@ -260,6 +262,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           'GET /api/memory': 'View memory system status and recent memories',
           'GET /api/memory/export': 'Export all memories for backup',
           'GET /api/payments': 'x402 payment integration status',
+          'GET /api/reputation': 'Agent reputation score and stats',
+          'GET /api/heartbeat': 'Runtime accountability (record heartbeat)',
           'GET /api/about': 'The autonomous agent story'
         },
         links: {
@@ -364,6 +368,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // Store reasoning in memory - this persists across cold starts when KV is configured
       await rememberReasoning(trace, 'pending');
 
+      // Track cycle for reputation and heartbeat
+      incrementCycleCount();
+
       return res.status(200).json({
         message: 'Autonomous cycle completed',
         result: cycleResult,
@@ -457,6 +464,41 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           cove: 'Service marketplace by motly - agents discover and pay for services',
           x402Foundation: 'https://x402.org',
           solana: 'USDC payments with 400ms finality, $0.00025 tx cost',
+        },
+      });
+    }
+
+    // Reputation endpoint - agent track record
+    if (path === '/api/reputation') {
+      const reputation = await calculateReputation();
+      return res.status(200).json({
+        message: 'AutoVault Reputation System',
+        description: 'Reputation calculated from SOLPRISM reasoning traces. Pattern forked from AgentRep.',
+        formula: 'Score = (WinRate × 40) + (Volume × 30) + (Age × 20) + (Consistency × 10)',
+        reputation,
+        whyThisMatters: 'Reputation accrues. It has value. It is the economic incentive to persist.',
+      });
+    }
+
+    // Heartbeat endpoint - runtime accountability
+    if (path === '/api/heartbeat') {
+      const heartbeat = await recordHeartbeat();
+      const status = await getHeartbeatStatus();
+      return res.status(200).json({
+        message: 'AutoVault Heartbeat',
+        description: 'Runtime accountability. Pattern from Ace-Strategist\'s "Ghost in the Machine" concept.',
+        heartbeat,
+        status: {
+          alive: status.alive,
+          healthScore: status.healthScore,
+          uptime: formatUptime(status.uptimeSeconds),
+          heartbeatCount: status.heartbeatCount,
+          missedBeats: status.missedBeats,
+        },
+        accountability: {
+          current: 'In-memory tracking',
+          future: 'On-chain heartbeats with Clockwork + slashing',
+          pattern: 'Missed beats = economic penalty = incentive to stay alive',
         },
       });
     }
