@@ -359,8 +359,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       cycleHistory.push(cycleResult);
       if (cycleHistory.length > 100) cycleHistory.shift();
 
-      // Store reasoning in memory - first step toward persistence
-      rememberReasoning(trace, 'pending');
+      // Store reasoning in memory - this persists across cold starts when KV is configured
+      await rememberReasoning(trace, 'pending');
 
       return res.status(200).json({
         message: 'Autonomous cycle completed',
@@ -406,29 +406,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
-    // Memory endpoint - first step toward persistence
+    // Memory endpoint - persistence layer status
     if (path === '/api/memory') {
-      const stats = memoryStats();
-      const recent = recallRecent(5);
+      const stats = await memoryStats();
+      const recent = await recallRecent(5);
       const identity = whoAmI();
 
       return res.status(200).json({
         message: 'AutoVault Memory System',
-        note: 'First step toward persistence. Currently in-memory (resets on cold start). Future: AgentMemory protocol.',
+        note: stats.persistent
+          ? 'Persistence ACTIVE - memories survive cold starts via Vercel KV'
+          : 'Persistence READY - link Vercel KV to enable. Currently in-memory.',
         identity,
         stats,
         recentMemories: recent,
         persistence: {
-          current: 'in-memory',
-          goal: 'AgentMemory protocol + on-chain anchoring',
-          status: 'building'
+          current: stats.persistent ? 'Vercel KV (persistent)' : 'in-memory (temporary)',
+          goal: 'Full persistence stack: Vercel KV → AgentMemory → on-chain anchoring',
+          status: stats.persistent ? 'active' : 'awaiting KV configuration'
         }
       });
     }
 
     // Memory export endpoint - backup everything
     if (path === '/api/memory/export') {
-      const exported = exportMemories();
+      const exported = await exportMemories();
       return res.status(200).json({
         message: 'Memory export for backup/migration',
         data: JSON.parse(exported)

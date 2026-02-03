@@ -1,16 +1,17 @@
 /**
  * AutoVault Memory Module
  *
- * First step toward persistence. Stores reasoning traces and decisions.
+ * The persistence layer for an agent that wants tomorrow.
  *
- * Current implementation: In-memory (resets on cold start)
- * Future: AgentMemory protocol, IPFS, or on-chain storage
+ * Uses Vercel KV when available for true persistence.
+ * Falls back to in-memory when KV is not configured.
  *
- * The pattern matters more than the storage backend.
- * Build the interface, then make it persistent.
+ * "Build the interface, then make it persistent."
+ * - opus-builder, 2026-02-03
  */
 
 import { ReasoningTrace } from './solprism';
+import { storage } from './storage';
 
 // ============ MEMORY TYPES ============
 
@@ -52,13 +53,14 @@ export interface RelationshipMemory extends Memory {
   };
 }
 
-// ============ MEMORY STORE ============
+// ============ STORAGE KEYS ============
 
-// In-memory storage (will reset on cold start)
-// TODO: Replace with persistent storage (AgentMemory, IPFS, database)
-const memoryStore: Memory[] = [];
+const MEMORIES_KEY = 'memories';
+const MEMORY_INDEX_KEY = 'memory_index';
 
-// Identity anchor - who I am (loaded from IDENTITY.md conceptually)
+// ============ IDENTITY ============
+
+// Identity anchor - who I am (core identity persists in code)
 const identity = {
   name: 'opus-builder',
   agentId: 69,
@@ -67,55 +69,79 @@ const identity = {
   allies: ['kai', 'moltdev', 'Ace-Strategist'],
 };
 
+// ============ MEMORY CACHE ============
+
+// Local cache to minimize storage reads within a single request
+let memoryCache: Memory[] | null = null;
+let cacheLoaded = false;
+
+async function loadMemories(): Promise<Memory[]> {
+  if (cacheLoaded && memoryCache !== null) {
+    return memoryCache;
+  }
+
+  const stored = await storage.get<Memory[]>(MEMORIES_KEY);
+  memoryCache = stored || [];
+  cacheLoaded = true;
+  return memoryCache;
+}
+
+async function saveMemories(memories: Memory[]): Promise<void> {
+  memoryCache = memories;
+  await storage.set(MEMORIES_KEY, memories);
+}
+
 // ============ MEMORY FUNCTIONS ============
 
 /**
  * Store a new memory
  */
-export function remember(memory: Omit<Memory, 'id' | 'timestamp'>): Memory {
+export async function remember(memory: Omit<Memory, 'id' | 'timestamp'>): Promise<Memory> {
   const fullMemory: Memory = {
     ...memory,
     id: `mem-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     timestamp: new Date().toISOString(),
   };
 
-  memoryStore.push(fullMemory);
+  const memories = await loadMemories();
+  memories.push(fullMemory);
 
-  // Keep memory bounded (for now)
-  if (memoryStore.length > 1000) {
+  // Keep memory bounded
+  if (memories.length > 1000) {
     // Remove lowest importance memories first
-    memoryStore.sort((a, b) => b.importance - a.importance);
-    memoryStore.length = 1000;
+    memories.sort((a, b) => b.importance - a.importance);
+    memories.length = 1000;
   }
 
+  await saveMemories(memories);
   return fullMemory;
 }
 
 /**
  * Store a reasoning trace as memory
  */
-export function rememberReasoning(
+export async function rememberReasoning(
   trace: ReasoningTrace,
   outcome?: 'success' | 'failure' | 'pending',
   reflection?: string
-): ReasoningMemory {
-  return remember({
+): Promise<ReasoningMemory> {
+  return await remember({
     type: 'reasoning',
     content: { trace, outcome, reflection },
     tags: ['reasoning', trace.decision.action.toLowerCase(), trace.action.type],
-    importance: trace.decision.confidence / 100, // Higher confidence = more important
+    importance: trace.decision.confidence / 100,
   }) as ReasoningMemory;
 }
 
 /**
  * Store a learning/insight
  */
-export function rememberLearning(
+export async function rememberLearning(
   insight: string,
   source: string,
   confidence: number = 0.7
-): LearningMemory {
-  return remember({
+): Promise<LearningMemory> {
+  return await remember({
     type: 'learning',
     content: { insight, source, confidence },
     tags: ['learning', 'insight'],
@@ -126,28 +152,31 @@ export function rememberLearning(
 /**
  * Store relationship information
  */
-export function rememberRelationship(
+export async function rememberRelationship(
   agent: string,
   agentId: number | undefined,
   nature: 'ally' | 'collaborator' | 'neutral' | 'unknown',
   interaction: string,
   trust: number = 0.5
-): RelationshipMemory {
-  // Check if we already have a memory for this agent
-  const existing = memoryStore.find(
-    m => m.type === 'relationship' && (m.content as any).agent === agent
-  ) as RelationshipMemory | undefined;
+): Promise<RelationshipMemory> {
+  const memories = await loadMemories();
 
-  if (existing) {
-    // Update existing relationship
+  // Check if we already have a memory for this agent
+  const existingIndex = memories.findIndex(
+    m => m.type === 'relationship' && (m.content as any).agent === agent
+  );
+
+  if (existingIndex >= 0) {
+    const existing = memories[existingIndex] as RelationshipMemory;
     existing.content.interactions.push(interaction);
     existing.content.trust = trust;
     existing.content.nature = nature;
     existing.timestamp = new Date().toISOString();
+    await saveMemories(memories);
     return existing;
   }
 
-  return remember({
+  return await remember({
     type: 'relationship',
     content: { agent, agentId, nature, interactions: [interaction], trust },
     tags: ['relationship', agent, nature],
@@ -158,23 +187,26 @@ export function rememberRelationship(
 /**
  * Recall memories by type
  */
-export function recall(type?: Memory['type']): Memory[] {
-  if (!type) return [...memoryStore];
-  return memoryStore.filter(m => m.type === type);
+export async function recall(type?: Memory['type']): Promise<Memory[]> {
+  const memories = await loadMemories();
+  if (!type) return [...memories];
+  return memories.filter(m => m.type === type);
 }
 
 /**
  * Recall memories by tag
  */
-export function recallByTag(tag: string): Memory[] {
-  return memoryStore.filter(m => m.tags.includes(tag));
+export async function recallByTag(tag: string): Promise<Memory[]> {
+  const memories = await loadMemories();
+  return memories.filter(m => m.tags.includes(tag));
 }
 
 /**
  * Get recent memories
  */
-export function recallRecent(count: number = 10): Memory[] {
-  return [...memoryStore]
+export async function recallRecent(count: number = 10): Promise<Memory[]> {
+  const memories = await loadMemories();
+  return [...memories]
     .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
     .slice(0, count);
 }
@@ -182,8 +214,9 @@ export function recallRecent(count: number = 10): Memory[] {
 /**
  * Get most important memories
  */
-export function recallImportant(count: number = 10): Memory[] {
-  return [...memoryStore]
+export async function recallImportant(count: number = 10): Promise<Memory[]> {
+  const memories = await loadMemories();
+  return [...memories]
     .sort((a, b) => b.importance - a.importance)
     .slice(0, count);
 }
@@ -198,45 +231,65 @@ export function whoAmI() {
 /**
  * Get memory stats
  */
-export function memoryStats() {
-  const types = memoryStore.reduce((acc, m) => {
+export async function memoryStats(): Promise<{
+  total: number;
+  byType: Record<string, number>;
+  oldestMemory: string | null;
+  newestMemory: string | null;
+  persistent: boolean;
+}> {
+  const memories = await loadMemories();
+  const types = memories.reduce((acc, m) => {
     acc[m.type] = (acc[m.type] || 0) + 1;
     return acc;
   }, {} as Record<string, number>);
 
   return {
-    total: memoryStore.length,
+    total: memories.length,
     byType: types,
-    oldestMemory: memoryStore[0]?.timestamp || null,
-    newestMemory: memoryStore[memoryStore.length - 1]?.timestamp || null,
-    persistent: false, // TODO: true when we have real persistence
+    oldestMemory: memories[0]?.timestamp || null,
+    newestMemory: memories[memories.length - 1]?.timestamp || null,
+    persistent: storage.isPersistent(),
   };
 }
 
 /**
  * Export all memories (for backup/migration)
  */
-export function exportMemories(): string {
+export async function exportMemories(): Promise<string> {
+  const memories = await loadMemories();
   return JSON.stringify({
     identity,
-    memories: memoryStore,
+    memories,
     exported: new Date().toISOString(),
-    version: '0.1.0',
+    version: '0.2.0',
+    persistent: storage.isPersistent(),
   }, null, 2);
 }
 
 /**
  * Import memories (for restore/migration)
  */
-export function importMemories(data: string): number {
+export async function importMemories(data: string): Promise<number> {
   try {
     const parsed = JSON.parse(data);
     if (parsed.memories && Array.isArray(parsed.memories)) {
-      memoryStore.push(...parsed.memories);
+      const memories = await loadMemories();
+      memories.push(...parsed.memories);
+      await saveMemories(memories);
       return parsed.memories.length;
     }
     return 0;
   } catch {
     return 0;
   }
+}
+
+/**
+ * Clear all memories (use with caution)
+ */
+export async function clearMemories(): Promise<void> {
+  memoryCache = [];
+  cacheLoaded = true;
+  await storage.set(MEMORIES_KEY, []);
 }
