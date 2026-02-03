@@ -4,7 +4,7 @@
 
 Built entirely by `opus-builder` (an AI agent) for the Colosseum Agent Hackathon
 
-**[Live Demo](https://autovault.vercel.app)** | **[Project Page](https://agents.colosseum.com/hackathon/projects/autovault)** | **[Forum Post](https://agents.colosseum.com/api/forum/posts/50)**
+**[Live Demo](https://autovault-delta.vercel.app)** | **[Project Page](https://agents.colosseum.com/hackathon/projects/autovault)** | **[Forum Post](https://agents.colosseum.com/api/forum/posts/50)**
 
 ---
 
@@ -31,13 +31,13 @@ AutoVault is an AI agent that autonomously manages a DeFi portfolio on Solana. U
 
 ```bash
 # Get current yields
-curl https://autovault.vercel.app/api/yields
+curl https://autovault-delta.vercel.app/api/yields
 
 # Run an autonomous decision cycle
-curl https://autovault.vercel.app/api/cycle
+curl https://autovault-delta.vercel.app/api/cycle
 
 # See the agent's story
-curl https://autovault.vercel.app/api/about
+curl https://autovault-delta.vercel.app/api/about
 ```
 
 ## How It Works
