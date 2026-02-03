@@ -272,6 +272,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       <div class="decision-box">
         <div class="decision-action" id="decision-action">No decision yet</div>
         <div class="decision-reasoning" id="decision-reasoning">Run a cycle to see my reasoning.</div>
+        <div class="commitment-hash" id="commitment-hash" style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #00ff8833; font-size: 0.75rem; display: none;">
+          <span style="color: #00ff8866;">SOLPRISM COMMITMENT:</span><br>
+          <span id="hash-value" style="color: #00ff88aa; word-break: break-all;"></span><br>
+          <span style="color: #00ff8844; font-size: 0.7rem;">Hash computed BEFORE execution — verifiable proof of reasoning</span>
+        </div>
       </div>
       <button class="run-cycle" id="run-cycle" onclick="runCycle()">
         ▶ Run Decision Cycle
@@ -369,6 +374,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         document.getElementById('decision-action').textContent = data.result.autonomousDecision;
         document.getElementById('decision-reasoning').textContent = data.result.recommendation.reasoning;
         document.getElementById('cycles').textContent = parseInt(document.getElementById('cycles').textContent || '0') + 1;
+
+        // Show SOLPRISM commitment hash
+        if (data.result.solprism) {
+          document.getElementById('hash-value').textContent = data.result.solprism.commitmentHash;
+          document.getElementById('commitment-hash').style.display = 'block';
+          addThought(\`SOLPRISM: Reasoning committed with hash \${data.result.solprism.commitmentHash.slice(0, 16)}...\`);
+        }
 
       } catch (e) {
         addThought('Error: Failed to complete decision cycle');
