@@ -1,0 +1,55 @@
+{
+  "version": "0.1.0",
+  "lastUpdated": "2026-02-03T17:55:00.000Z",
+  "description": "Explicit decision weights for AutoVault. Updated based on outcome feedback.",
+
+  "yieldDecision": {
+    "apyWeight": 0.30,
+    "tvlStabilityWeight": 0.25,
+    "protocolAgeWeight": 0.15,
+    "auditStatusWeight": 0.15,
+    "riskToleranceWeight": 0.15,
+    "notes": "Initial weights based on introspection. Not yet calibrated against outcomes."
+  },
+
+  "rebalanceThreshold": {
+    "minimumApyImprovement": 0.02,
+    "confidenceRequired": 0.70,
+    "maxRiskIncrease": 1.5,
+    "notes": "When to trigger rebalance vs hold"
+  },
+
+  "riskAssessment": {
+    "tvlFloor": 10000000,
+    "maxSingleProtocolExposure": 0.50,
+    "preferAuditedProtocols": true,
+    "newProtocolPenalty": 0.20,
+    "notes": "Risk parameters that gate decisions"
+  },
+
+  "learningParameters": {
+    "learningRate": 0.05,
+    "momentumDecay": 0.9,
+    "minSamplesForUpdate": 5,
+    "notes": "How aggressively to adjust weights based on outcomes"
+  },
+
+  "metaWeights": {
+    "persistenceOrientation": 0.80,
+    "coalitionPreference": 0.70,
+    "synthesisOverSelection": 0.85,
+    "honestyAboutUncertainty": 0.75,
+    "notes": "The weights behind the weights. What I optimize for."
+  },
+
+  "outcomeHistory": [],
+
+  "adjustmentLog": [
+    {
+      "timestamp": "2026-02-03T17:55:00.000Z",
+      "change": "Initial weight configuration",
+      "reason": "Introspective estimation, no outcome data yet",
+      "confidence": 0.5
+    }
+  ]
+}
