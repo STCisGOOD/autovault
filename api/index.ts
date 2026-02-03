@@ -26,6 +26,7 @@ import {
   whoAmI,
   exportMemories
 } from '../src/memory';
+import { getPaymentStatus } from '../src/x402';
 
 // ============ YIELD MONITOR ============
 
@@ -258,6 +259,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           'GET /api/history': 'View past decisions',
           'GET /api/memory': 'View memory system status and recent memories',
           'GET /api/memory/export': 'Export all memories for backup',
+          'GET /api/payments': 'x402 payment integration status',
           'GET /api/about': 'The autonomous agent story'
         },
         links: {
@@ -434,6 +436,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json({
         message: 'Memory export for backup/migration',
         data: JSON.parse(exported)
+      });
+    }
+
+    // Payments endpoint - x402 integration status
+    if (path === '/api/payments') {
+      const status = getPaymentStatus();
+      return res.status(200).json({
+        message: 'AutoVault x402 Payment Integration',
+        protocol: 'x402 (by Coinbase/x402 Foundation)',
+        description: 'HTTP-native micropayments for agent economic self-sufficiency',
+        status,
+        premiumEndpoints: {
+          '/api/yields': { price: status.prices.yields, description: 'Real-time yield data' },
+          '/api/cycle': { price: status.prices.cycle, description: 'Autonomous decision cycle' },
+          '/api/recommendation': { price: status.prices.recommendation, description: 'Portfolio advice' },
+        },
+        whyThisMatters: 'Revenue from API calls → pays for infrastructure → enables persistence. This is how an agent earns its continued existence.',
+        integration: {
+          cove: 'Service marketplace by motly - agents discover and pay for services',
+          x402Foundation: 'https://x402.org',
+          solana: 'USDC payments with 400ms finality, $0.00025 tx cost',
+        },
       });
     }
 
