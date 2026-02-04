@@ -51,6 +51,7 @@
 import { createUnifiedIdentityService } from './unified/UnifiedIdentityService';
 import { createPaymentGateway } from './economic/x402PaymentGateway';
 import { getInfrastructureCostTracker } from './economic/InfrastructureCostTracker';
+import type { Seed } from './behavioral/PersistenceProtocol';
 
 // =============================================================================
 // CRYPTO LAYER - Cryptographic identity
@@ -237,7 +238,7 @@ export {
 // PACKAGE INFO
 // =============================================================================
 
-export const VERSION = '0.1.0';
+export const VERSION = '0.2.0';
 export const PACKAGE_NAME = 'persistence-agent-identity';
 
 /**
@@ -289,3 +290,177 @@ export async function createMainnetIdentitySystem(
     costs: getInfrastructureCostTracker(),
   };
 }
+
+// =============================================================================
+// TRUE QUICK START - One function to persistent identity (Solana-only)
+// =============================================================================
+
+export interface QuickStartConfig {
+  /** Agent name (used to generate subdomain) */
+  name: string;
+  /** Optional initial SEED for behavioral identity */
+  seed?: Seed;
+  /** Solana RPC URL (default: devnet) */
+  rpcUrl?: string;
+}
+
+export interface QuickStartResult {
+  /** Agent's decentralized identifier */
+  did: string;
+  /** Agent's public key (base58) */
+  publicKey: string;
+  /** Solana signature of genesis transaction */
+  genesisTx: string;
+  /** Store a SEED on Solana */
+  storeSeed: (seed: Seed) => Promise<{ txId: string; seedHash: string }>;
+  /** Get stored SEED from Solana */
+  getSeed: () => Promise<Seed | null>;
+  /** Get identity chain from Solana */
+  getChain: () => Promise<any[]>;
+  /** Check balance */
+  getBalance: () => Promise<number>;
+}
+
+/**
+ * TRUE QUICK START - Get persistent identity in one function call.
+ *
+ * Uses ONLY Solana (no Arweave). Perfect for hackathons.
+ *
+ * @example
+ * ```typescript
+ * import { quickStart } from 'persistence-agent-identity';
+ *
+ * const identity = await quickStart({ name: 'my-agent' });
+ * console.log(identity.did);  // did:persistence:ABC123...
+ *
+ * // Store your SEED
+ * await identity.storeSeed(mySeed);
+ * ```
+ *
+ * This handles EVERYTHING:
+ * - Creates Solana devnet connection
+ * - Airdrops SOL for transactions
+ * - Generates keypair & self-signed delegation
+ * - Stores genesis on Solana
+ * - Returns simple interface for SEED storage
+ */
+export async function quickStart(config: QuickStartConfig): Promise<QuickStartResult> {
+  const { Connection, Keypair, PublicKey } = await import('@solana/web3.js');
+  const bs58 = await import('bs58');
+
+  const rpcUrl = config.rpcUrl || 'https://api.devnet.solana.com';
+  const connection = new Connection(rpcUrl, 'confirmed');
+
+  // Import required modules
+  const { AgentIdentityService } = await import('./crypto/AgentIdentityService');
+  const { generateAgentSubdomain } = await import('./crypto/GenesisProtocol');
+  const { SolanaIdentityStorage } = await import('./crypto/SolanaIdentityStorage');
+  const { hashSeed } = await import('./behavioral/PersistenceProtocol');
+
+  // Generate payer wallet and airdrop
+  const payerKeypair = Keypair.generate();
+  console.log(`[quickStart] Generated payer: ${payerKeypair.publicKey.toBase58()}`);
+
+  // Airdrop 1 SOL for transactions
+  console.log('[quickStart] Requesting airdrop...');
+  const airdropSig = await connection.requestAirdrop(payerKeypair.publicKey, 1_000_000_000);
+  await connection.confirmTransaction(airdropSig, 'confirmed');
+  console.log('[quickStart] Airdrop confirmed');
+
+  // Create identity service and derive keypair
+  const identityService = new AgentIdentityService();
+
+  // Get current slot for genesis block reference
+  const slot = await connection.getSlot();
+  const block = await connection.getBlock(slot, { maxSupportedTransactionVersion: 0 });
+
+  if (!block) {
+    throw new Error('Failed to fetch Solana block');
+  }
+
+  // Create self-signed delegation
+  const subdomain = generateAgentSubdomain(config.name);
+  const delegatorPubkey = bs58.default.encode(payerKeypair.publicKey.toBytes());
+
+  const delegationWithoutSig = {
+    delegator: {
+      nft_address: 'self-signed-devnet',
+      wallet_pubkey: delegatorPubkey,
+      did: 'did:persistence:' + delegatorPubkey,
+    },
+    agent: {
+      name: config.name,
+      subdomain,
+      purpose: 'Persistent agent identity via Persistence Protocol',
+      capabilities: ['persistence-protocol'],
+    },
+    genesis_block: {
+      chain: 'solana' as const,
+      block_height: slot,
+      block_hash: block.blockhash,
+    },
+    created_at: Date.now(),
+    expires_at: null,
+  };
+
+  // Sign delegation
+  const { sign } = await import('@noble/ed25519');
+  const { utf8ToBytes } = await import('@noble/hashes/utils');
+  const message = JSON.stringify(delegationWithoutSig, Object.keys(delegationWithoutSig).sort());
+  const signature = await sign(utf8ToBytes(message), payerKeypair.secretKey.slice(0, 32));
+
+  const delegation = {
+    ...delegationWithoutSig,
+    delegator_signature: bs58.default.encode(signature),
+  };
+
+  // Initialize identity from delegation
+  const genesisRecord = await identityService.initializeFromGenesis(delegation);
+  const agentDid = identityService.getDID()!;
+  const agentPubkeyBase58 = identityService.getPublicKey()!;
+  const agentPubkey = new PublicKey(agentPubkeyBase58);
+
+  // Create Solana storage
+  const storage = new SolanaIdentityStorage({ connection });
+  storage.setPayer(payerKeypair);
+
+  // Store genesis on Solana
+  console.log('[quickStart] Storing genesis on Solana...');
+  const { genesisTx } = await storage.storeGenesis(delegation, genesisRecord);
+  console.log(`[quickStart] Genesis stored: ${genesisTx}`);
+
+  // Store initial SEED if provided
+  if (config.seed) {
+    console.log('[quickStart] Storing initial SEED...');
+    await storage.storeSeed(agentDid, config.seed);
+    console.log('[quickStart] SEED stored');
+  }
+
+  console.log(`[quickStart] Identity created: ${agentDid}`);
+
+  // Return simple interface
+  return {
+    did: agentDid,
+    publicKey: agentPubkeyBase58,
+    genesisTx,
+
+    storeSeed: async (seed: Seed) => {
+      return storage.storeSeed(agentDid, seed);
+    },
+
+    getSeed: async () => {
+      return storage.getLatestSeed(agentDid);
+    },
+
+    getChain: async () => {
+      return storage.getIdentityChain(agentDid);
+    },
+
+    getBalance: async () => {
+      return storage.getBalance(payerKeypair.publicKey);
+    },
+  };
+}
+
+// Re-export Solana storage for direct use
+export { SolanaIdentityStorage, createSolanaStorage } from './crypto';

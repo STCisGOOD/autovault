@@ -31,9 +31,16 @@ export {
 export {
   ArweaveIdentityStorage,
   createArweaveStorage,
+} from './ArweaveIdentityStorage';
+
+// Solana-native storage (recommended for hackathon)
+export {
+  SolanaIdentityStorage,
+  createSolanaStorage,
   agentIdentityExists,
   agentIdentityActive,
-} from './ArweaveIdentityStorage';
+  type SolanaStorageConfig,
+} from './SolanaIdentityStorage';
 
 export {
   GenesisProtocol,
