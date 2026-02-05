@@ -16,7 +16,7 @@
  */
 
 import type { SeedCommitmentRecord, AgentIdentityService } from '../crypto/AgentIdentityService';
-import type { ArweaveIdentityStorage } from '../crypto/ArweaveIdentityStorage';
+import type { SolanaIdentityStorage } from '../crypto/SolanaIdentityStorage';
 import type { Seed, PropagationResult } from '../behavioral/PersistenceProtocol';
 import { hashSeed } from '../behavioral/PersistenceProtocol';
 
@@ -33,7 +33,7 @@ export interface SeedCommitmentConfig {
 export interface CommitmentResult {
   success: boolean;
   commitment?: SeedCommitmentRecord;
-  arweaveTx?: string;
+  solanaTx?: string;
   seedHash?: string;
   error?: string;
 }
@@ -44,7 +44,7 @@ export interface SeedHistory {
     hash: string;
     divergenceScore?: number;
     timestamp: number;
-    arweaveTx?: string;
+    solanaTx?: string;
   }>;
   evolutionPath: string[];  // Version chain
   totalCommits: number;
@@ -57,13 +57,13 @@ export interface SeedHistory {
 
 export class SeedCommitmentManager {
   private identityService: AgentIdentityService;
-  private storage: ArweaveIdentityStorage;
+  private storage: SolanaIdentityStorage;
   private config: SeedCommitmentConfig;
   private pendingSeeds: Map<string, Seed> = new Map();
 
   constructor(
     identityService: AgentIdentityService,
-    storage: ArweaveIdentityStorage,
+    storage: SolanaIdentityStorage,
     config?: Partial<SeedCommitmentConfig>
   ) {
     this.identityService = identityService;
@@ -105,7 +105,7 @@ export class SeedCommitmentManager {
       const agentDid = this.identityService.getDID()!;
       const seedHash = hashSeed(seed);
 
-      // Store SEED on Arweave
+      // Store SEED on Solana
       const { txId } = await this.storage.storeSeed(agentDid, seed);
 
       // Create commitment in chain
@@ -116,13 +116,13 @@ export class SeedCommitmentManager {
         divergenceScore
       );
 
-      // Store commitment on Arweave
+      // Store commitment on Solana
       await this.storage.appendRecord(agentDid, commitment);
 
       return {
         success: true,
         commitment,
-        arweaveTx: txId,
+        solanaTx: txId,
         seedHash
       };
     } catch (error) {
@@ -177,7 +177,7 @@ export class SeedCommitmentManager {
       hash: c.seed_hash,
       divergenceScore: c.divergence_score,
       timestamp: c.timestamp,
-      arweaveTx: c.arweave_tx
+      solanaTx: c.solana_tx
     }));
 
     const evolutionPath = commits.map(c => c.version);
@@ -254,7 +254,7 @@ export class SeedCommitmentManager {
       return { seed: null, commitment: null };
     }
 
-    // Fetch SEED from Arweave
+    // Fetch SEED from Solana
     const seed = await this.storage.getLatestSeed(agentDid);
 
     return { seed, commitment: latestCommitment };
@@ -330,7 +330,7 @@ export class SeedCommitmentManager {
 
 export function createSeedCommitmentManager(
   identityService: AgentIdentityService,
-  storage: ArweaveIdentityStorage,
+  storage: SolanaIdentityStorage,
   config?: Partial<SeedCommitmentConfig>
 ): SeedCommitmentManager {
   return new SeedCommitmentManager(identityService, storage, config);

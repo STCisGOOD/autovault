@@ -11,7 +11,7 @@
  */
 
 import { AgentIdentityService, type GenesisDelegate, type IdentityRecord, type SeedCommitmentRecord } from '../crypto/AgentIdentityService';
-import { ArweaveIdentityStorage } from '../crypto/ArweaveIdentityStorage';
+import { SolanaIdentityStorage, type SolanaStorageConfig } from '../crypto/SolanaIdentityStorage';
 import { GenesisProtocol, type GenesisConfig, type GenesisResult } from '../crypto/GenesisProtocol';
 import type { Seed, PropagationResult, ProtocolRunner } from '../behavioral/PersistenceProtocol';
 import { hashSeed, evaluatePropagation } from '../behavioral/PersistenceProtocol';
@@ -42,7 +42,7 @@ export interface UnifiedIdentity {
 
 export interface UnifiedIdentityConfig {
   genesisConfig: GenesisConfig;
-  arweaveWallet?: any;
+  solanaStorage: SolanaStorageConfig;
   divergenceThreshold?: number;
 }
 
@@ -55,7 +55,7 @@ export interface RegistrationResult {
   success: boolean;
   identity?: UnifiedIdentity;
   agentDid?: string;
-  arweaveTxs?: {
+  solanaTxs?: {
     delegation: string;
     genesis: string;
     seed?: string;
@@ -85,7 +85,7 @@ export interface VerificationResult {
 
 export class UnifiedIdentityService {
   private identityService: AgentIdentityService;
-  private storage: ArweaveIdentityStorage;
+  private storage: SolanaIdentityStorage;
   private genesisProtocol: GenesisProtocol;
   private learningSystem: LearningSystem;
   private divergenceTester: DivergenceTester;
@@ -95,15 +95,11 @@ export class UnifiedIdentityService {
 
   constructor(config: UnifiedIdentityConfig) {
     this.identityService = new AgentIdentityService();
-    this.storage = new ArweaveIdentityStorage(config.arweaveWallet);
+    this.storage = new SolanaIdentityStorage(config.solanaStorage);
     this.genesisProtocol = new GenesisProtocol(config.genesisConfig);
     this.learningSystem = new LearningSystem();
     this.divergenceTester = new DivergenceTester();
     this.divergenceThreshold = config.divergenceThreshold || 0.35;
-
-    if (config.arweaveWallet) {
-      this.genesisProtocol.setArweaveWallet(config.arweaveWallet);
-    }
   }
 
   /**
@@ -140,7 +136,7 @@ export class UnifiedIdentityService {
         success: true,
         identity: identity ?? undefined,
         agentDid: genesisResult.agentDid,
-        arweaveTxs: genesisResult.arweaveTxs
+        solanaTxs: genesisResult.solanaTxs
       };
     } catch (error) {
       return {
@@ -151,11 +147,11 @@ export class UnifiedIdentityService {
   }
 
   /**
-   * Recover an existing identity from Arweave.
+   * Recover an existing identity from Solana.
    */
   async recover(delegation: GenesisDelegate): Promise<RegistrationResult> {
     try {
-      // Get the identity chain from Arweave
+      // Get the identity chain from Solana
       const derivedKeypair = this.identityService.deriveKeypairFromDelegation(delegation);
       const chain = await this.storage.getIdentityChain(derivedKeypair.did);
 
@@ -208,7 +204,7 @@ export class UnifiedIdentityService {
   ): Promise<{
     success: boolean;
     commitment?: SeedCommitmentRecord;
-    arweaveTx?: string;
+    solanaTx?: string;
     error?: string;
   }> {
     if (!this.identityService.isInitialized()) {
@@ -218,7 +214,7 @@ export class UnifiedIdentityService {
     try {
       const agentDid = this.identityService.getDID()!;
 
-      // Store SEED on Arweave
+      // Store SEED on Solana
       const { txId, seedHash } = await this.storage.storeSeed(agentDid, newSeed);
 
       // Create commitment in chain
@@ -229,7 +225,7 @@ export class UnifiedIdentityService {
         divergenceScore
       );
 
-      // Store commitment on Arweave
+      // Store commitment on Solana
       await this.storage.appendRecord(agentDid, commitment);
 
       // Update local state
@@ -239,7 +235,7 @@ export class UnifiedIdentityService {
       return {
         success: true,
         commitment,
-        arweaveTx: txId
+        solanaTx: txId
       };
     } catch (error) {
       return {

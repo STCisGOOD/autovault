@@ -28,12 +28,7 @@ export {
   type AgentKeypair,
 } from './AgentIdentityService';
 
-export {
-  ArweaveIdentityStorage,
-  createArweaveStorage,
-} from './ArweaveIdentityStorage';
-
-// Solana-native storage (recommended for hackathon)
+// Solana-native storage
 export {
   SolanaIdentityStorage,
   createSolanaStorage,
@@ -49,3 +44,12 @@ export {
   type GenesisConfig,
   type GenesisResult,
 } from './GenesisProtocol';
+
+// Solana Kit-first storage (Jan 2026 recommended stack)
+export {
+  SolanaIdentityStorageKit,
+  createSolanaKitStorage,
+  agentIdentityExistsKit,
+  agentIdentityActiveKit,
+  type SolanaKitStorageConfig,
+} from './SolanaIdentityStorageKit';

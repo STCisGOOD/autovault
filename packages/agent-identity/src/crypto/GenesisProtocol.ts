@@ -13,7 +13,7 @@
  * 5. Genesis record is created and stored
  */
 
-import { Connection, PublicKey } from '@solana/web3.js';
+import { Connection, PublicKey, Keypair } from '@solana/web3.js';
 import { sha256 } from '@noble/hashes/sha256';
 import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils';
 import bs58 from 'bs58';
@@ -25,7 +25,7 @@ import type {
   GenesisRecord,
 } from './AgentIdentityService';
 import { AgentIdentityService } from './AgentIdentityService';
-import { ArweaveIdentityStorage } from './ArweaveIdentityStorage';
+import { SolanaIdentityStorage } from './SolanaIdentityStorage';
 import type { Seed } from '../behavioral/PersistenceProtocol';
 
 // ============================================================================
@@ -34,7 +34,7 @@ import type { Seed } from '../behavioral/PersistenceProtocol';
 
 export interface GenesisConfig {
   solanaConnection: Connection;
-  arweaveWallet?: any;
+  payer?: Keypair;
   network: 'devnet' | 'mainnet';
 }
 
@@ -42,7 +42,7 @@ export interface GenesisResult {
   success: boolean;
   agentDid?: string;
   genesisRecord?: GenesisRecord;
-  arweaveTxs?: {
+  solanaTxs?: {
     delegation: string;
     genesis: string;
     seed?: string;
@@ -52,20 +52,23 @@ export interface GenesisResult {
 
 export class GenesisProtocol {
   private connection: Connection;
-  private storage: ArweaveIdentityStorage;
+  private storage: SolanaIdentityStorage;
   private network: 'devnet' | 'mainnet';
 
   constructor(config: GenesisConfig) {
     this.connection = config.solanaConnection;
-    this.storage = new ArweaveIdentityStorage(config.arweaveWallet);
+    this.storage = new SolanaIdentityStorage({
+      connection: config.solanaConnection,
+      payer: config.payer
+    });
     this.network = config.network;
   }
 
   /**
-   * Set the Arweave wallet for storage operations.
+   * Set the payer keypair for storage operations.
    */
-  setArweaveWallet(wallet: any): void {
-    this.storage.setWallet(wallet);
+  setPayer(payer: Keypair): void {
+    this.storage.setPayer(payer);
   }
 
   /**
@@ -120,7 +123,7 @@ export class GenesisProtocol {
       const identityService = new AgentIdentityService();
       const genesisRecord = await identityService.initializeFromGenesis(signedDelegation);
 
-      // Store on Arweave
+      // Store on Solana
       const { delegationTx, genesisTx } = await this.storage.storeGenesis(
         signedDelegation,
         genesisRecord
@@ -148,8 +151,7 @@ export class GenesisProtocol {
         if (latestCommitment) {
           await this.storage.appendRecord(
             genesisRecord.agent_did,
-            latestCommitment,
-            genesisTx
+            latestCommitment
           );
         }
       }
@@ -158,7 +160,7 @@ export class GenesisProtocol {
         success: true,
         agentDid: genesisRecord.agent_did,
         genesisRecord,
-        arweaveTxs: {
+        solanaTxs: {
           delegation: delegationTx,
           genesis: genesisTx,
           seed: seedTx,

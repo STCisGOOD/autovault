@@ -7,7 +7,7 @@
  * 1. Receive delegation + optional SEED
  * 2. Check payment (mainnet) or airdrop (devnet)
  * 3. Create identity through genesis protocol
- * 4. Store on Arweave
+ * 4. Store on Solana
  * 5. Return identity details
  */
 
@@ -34,7 +34,7 @@ export interface RegisterResponse {
   agentDid?: string;
   publicKey?: string;
   walletAddress?: string;
-  arweaveTxs?: {
+  solanaTxs?: {
     delegation: string;
     genesis: string;
     seed?: string;
@@ -49,7 +49,7 @@ export interface RegisterResponse {
 export interface RegistrationServiceConfig {
   network: 'devnet' | 'mainnet';
   solanaRpc: string;
-  arweaveWallet?: any;
+  payer?: any;
   paymentGateway?: X402PaymentGateway;
 }
 
@@ -72,10 +72,13 @@ export class RegistrationService {
     this.unifiedService = new UnifiedIdentityService({
       genesisConfig: {
         solanaConnection: connection,
-        arweaveWallet: config.arweaveWallet,
+        payer: config.payer,
         network: config.network,
       },
-      arweaveWallet: config.arweaveWallet,
+      solanaStorage: {
+        connection,
+        payer: config.payer,
+      },
     });
 
     this.paymentGateway = config.paymentGateway || createPaymentGateway({
@@ -129,7 +132,7 @@ export class RegistrationService {
       response.success = true;
       response.agentDid = result.agentDid;
       response.publicKey = result.identity?.publicKey;
-      response.arweaveTxs = result.arweaveTxs;
+      response.solanaTxs = result.solanaTxs;
 
       // Airdrop on devnet
       if (this.network === 'devnet') {

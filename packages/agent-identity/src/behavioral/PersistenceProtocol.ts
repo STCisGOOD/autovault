@@ -74,6 +74,44 @@ export interface SeedModification {
   priority: number;
 }
 
+/**
+ * Evolution history entry for neuroplastic SEEDs.
+ * Tracks how the SEED has changed over time.
+ */
+export interface SeedEvolutionHistory {
+  timestamp: string;
+  change_type: 'critical_period' | 'gradual' | 'verification' | 'manual';
+  delta: number;              // Magnitude of change (0-1)
+  trigger: string;            // What caused this evolution
+  previousHash?: string;      // Hash of previous state
+}
+
+/**
+ * Extended SEED with neuroplastic evolution tracking.
+ * Compatible with the Evolving SEED system.
+ */
+export interface EvolvableSeed extends Seed {
+  agent_did?: string;
+  delegator_did?: string;
+  created_at?: string;
+  core_traits?: Array<{
+    name: string;
+    weight: number;
+    immutable?: boolean;
+  }>;
+  values?: Array<{
+    name: string;
+    priority: number;
+  }>;
+  behavioral_bounds?: {
+    permitted_actions: string[];
+    forbidden_actions: string[];
+    resource_limits: Record<string, number>;
+  };
+  reasoning_patterns?: string[];
+  evolution_history?: SeedEvolutionHistory[];
+}
+
 // ============================================================================
 // CORE ALGORITHM - The heart of the protocol
 // ============================================================================

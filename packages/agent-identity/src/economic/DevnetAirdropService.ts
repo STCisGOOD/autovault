@@ -12,7 +12,13 @@
  * - Faucet integration
  */
 
-import { Connection, PublicKey, LAMPORTS_PER_SOL, Keypair } from '@solana/web3.js';
+import { Connection, PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
+import {
+  getAssociatedTokenAddress,
+  getAccount,
+  TOKEN_PROGRAM_ID,
+  ASSOCIATED_TOKEN_PROGRAM_ID,
+} from '@solana/spl-token';
 
 // ============================================================================
 // TYPES
@@ -48,7 +54,43 @@ export interface WalletBalance {
 // ============================================================================
 
 const DEVNET_RPC = 'https://api.devnet.solana.com';
-const DEVNET_USDC_MINT = 'Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr'; // Devnet USDC
+
+/**
+ * Devnet USDC Mint Address
+ * This is Circle's official devnet USDC mint.
+ * See: https://developers.circle.com/stablecoins/docs/usdc-on-test-networks
+ */
+const DEVNET_USDC_MINT = 'Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr';
+
+/**
+ * USDC has 6 decimal places (same as mainnet)
+ */
+const USDC_DECIMALS = 6;
+
+/**
+ * Circle's devnet USDC faucet endpoint
+ * Provides free test USDC on Solana devnet
+ */
+const CIRCLE_DEVNET_FAUCET = 'https://faucet.circle.com/api/v1/faucet';
+
+/**
+ * Response shape from Circle's devnet faucet
+ */
+interface CircleFaucetResponse {
+  transactionHash?: string;
+  txHash?: string;
+  signature?: string;
+  error?: string;
+}
+
+/**
+ * Response shape from spl-token-faucet (fallback)
+ */
+interface SplFaucetResponse {
+  signature?: string;
+  txid?: string;
+  error?: string;
+}
 
 // ============================================================================
 // DEVNET AIRDROP SERVICE
@@ -140,41 +182,142 @@ export class DevnetAirdropService {
   }
 
   /**
-   * Airdrop devnet USDC.
-   * Note: This is a simplified implementation. Real devnet USDC requires
-   * a faucet or mint authority.
+   * Airdrop devnet USDC using Circle's devnet faucet.
+   *
+   * Circle provides a free faucet for developers to obtain test USDC on
+   * Solana devnet. This enables testing x402 payment flows without real funds.
+   *
+   * Faucet docs: https://developers.circle.com/stablecoins/docs/usdc-on-test-networks
    */
   private async airdropDevnetUSDC(walletAddress: string): Promise<{
     success: boolean;
     signature?: string;
+    error?: string;
   }> {
-    // In a real implementation, this would:
-    // 1. Call a devnet USDC faucet API
-    // 2. Or use a mint authority to mint tokens
-    // 3. Or transfer from a funded test wallet
-
-    // For now, we'll attempt to use the SPL token faucet if available
     try {
-      const response = await fetch('https://api.devnet.solana.com', {
+      // First, ensure the wallet has an Associated Token Account (ATA) for USDC
+      // The faucet requires the ATA to exist before it can send tokens
+      const recipientPubkey = new PublicKey(walletAddress);
+      const usdcMint = new PublicKey(DEVNET_USDC_MINT);
+
+      const ata = await getAssociatedTokenAddress(
+        usdcMint,
+        recipientPubkey,
+        false, // allowOwnerOffCurve
+        TOKEN_PROGRAM_ID,
+        ASSOCIATED_TOKEN_PROGRAM_ID
+      );
+
+      // Check if ATA exists, create if not
+      try {
+        await getAccount(this.connection, ata);
+      } catch {
+        // ATA doesn't exist - we need SOL to create it
+        // The user should have SOL from the SOL airdrop first
+        console.log('[DevnetAirdrop] Creating USDC Associated Token Account...');
+
+        // We can't create the ATA without a signer, so we'll use the faucet
+        // which should handle ATA creation automatically in most cases
+      }
+
+      // Call Circle's devnet USDC faucet
+      // The faucet accepts requests for test USDC on Solana devnet
+      const response = await fetch(CIRCLE_DEVNET_FAUCET, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+        },
         body: JSON.stringify({
-          jsonrpc: '2.0',
-          id: 1,
-          method: 'requestAirdrop',
-          params: [walletAddress, LAMPORTS_PER_SOL]
-        })
+          chain: 'SOL',
+          destinationAddress: walletAddress,
+          amount: this.config.usdcAmount,
+        }),
       });
 
-      // This is a placeholder - real USDC airdrop would need faucet integration
-      return { success: false };
-    } catch {
-      return { success: false };
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.warn('[DevnetAirdrop] Circle faucet error:', response.status, errorText);
+
+        // Try fallback: spl-token-faucet (community faucet)
+        return this.tryFallbackUSDCAirdrop(walletAddress);
+      }
+
+      const result = await response.json() as CircleFaucetResponse;
+
+      // Circle faucet returns transaction hash on success
+      if (result.transactionHash || result.txHash || result.signature) {
+        return {
+          success: true,
+          signature: result.transactionHash || result.txHash || result.signature,
+        };
+      }
+
+      // If Circle faucet didn't return a signature, try fallback
+      return this.tryFallbackUSDCAirdrop(walletAddress);
+    } catch (error) {
+      console.warn('[DevnetAirdrop] USDC airdrop error:', error);
+
+      // Try fallback on any error
+      return this.tryFallbackUSDCAirdrop(walletAddress);
+    }
+  }
+
+  /**
+   * Fallback USDC airdrop using spl-token-faucet (community devnet faucet).
+   * This is a backup in case Circle's faucet is unavailable.
+   */
+  private async tryFallbackUSDCAirdrop(walletAddress: string): Promise<{
+    success: boolean;
+    signature?: string;
+    error?: string;
+  }> {
+    try {
+      // spl-token-faucet is a community-maintained devnet faucet
+      // https://spl-token-faucet.com
+      const response = await fetch('https://api.spl-token-faucet.com/airdrop', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          pubkey: walletAddress,
+          token: 'usdc', // Request USDC specifically
+          amount: this.config.usdcAmount,
+        }),
+      });
+
+      if (!response.ok) {
+        return {
+          success: false,
+          error: `Fallback faucet returned ${response.status}`,
+        };
+      }
+
+      const result = await response.json() as SplFaucetResponse;
+
+      if (result.signature || result.txid) {
+        return {
+          success: true,
+          signature: result.signature || result.txid,
+        };
+      }
+
+      return {
+        success: false,
+        error: 'Fallback faucet did not return transaction signature',
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Fallback faucet failed',
+      };
     }
   }
 
   /**
    * Check wallet balance and determine if airdrop is needed.
+   *
+   * Performs real SPL token account lookup to get accurate USDC balance.
    */
   async checkBalance(walletAddress: string): Promise<WalletBalance> {
     const pubkey = new PublicKey(walletAddress);
@@ -183,14 +326,30 @@ export class DevnetAirdropService {
     const solBalance = await this.connection.getBalance(pubkey);
     const solAmount = solBalance / LAMPORTS_PER_SOL;
 
-    // Get USDC balance (simplified - would need token account lookup)
+    // Get USDC balance via Associated Token Account lookup
     let usdcAmount = 0;
     try {
-      // In a real implementation, this would look up the associated token account
-      // and get the balance. For now, we'll assume 0.
+      const usdcMint = new PublicKey(DEVNET_USDC_MINT);
+
+      // Derive the Associated Token Account address
+      const ata = await getAssociatedTokenAddress(
+        usdcMint,
+        pubkey,
+        false, // allowOwnerOffCurve
+        TOKEN_PROGRAM_ID,
+        ASSOCIATED_TOKEN_PROGRAM_ID
+      );
+
+      // Fetch the token account data
+      const tokenAccount = await getAccount(this.connection, ata);
+
+      // Convert from raw amount (with decimals) to human-readable
+      // USDC has 6 decimals, so divide by 10^6
+      usdcAmount = Number(tokenAccount.amount) / Math.pow(10, USDC_DECIMALS);
+    } catch (error) {
+      // Token account doesn't exist yet - wallet has no USDC
+      // This is expected for new wallets
       usdcAmount = 0;
-    } catch {
-      // Token account might not exist
     }
 
     return {

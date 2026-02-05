@@ -24,3 +24,10 @@ npm-debug.log*
 # Test coverage
 coverage/
 .vercel
+
+# Anchor / Rust build artifacts
+**/target/
+**/*-keypair.json
+
+# Windows artifacts
+nul

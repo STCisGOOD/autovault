@@ -12,6 +12,7 @@
 import { CombinedVerifier, createCombinedVerifier, type VerificationLevel, type CombinedVerificationResult } from '../unified/CombinedVerification';
 import { X402PaymentGateway, createPaymentGateway } from '../economic/x402PaymentGateway';
 import { getInfrastructureCostTracker } from '../economic/InfrastructureCostTracker';
+import type { SolanaStorageConfig } from '../crypto/SolanaIdentityStorage';
 
 // ============================================================================
 // TYPES
@@ -41,6 +42,7 @@ export interface VerifyResponse {
 
 export interface VerificationServiceConfig {
   network: 'devnet' | 'mainnet';
+  solanaStorage: SolanaStorageConfig;
   divergenceThreshold?: number;
   paymentGateway?: X402PaymentGateway;
 }
@@ -55,7 +57,7 @@ export class VerificationService {
   private costTracker = getInfrastructureCostTracker();
 
   constructor(config: VerificationServiceConfig) {
-    this.verifier = createCombinedVerifier({
+    this.verifier = createCombinedVerifier(config.solanaStorage, {
       divergenceThreshold: config.divergenceThreshold || 0.35,
     });
 

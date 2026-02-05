@@ -12,7 +12,7 @@
 
 import type { IdentityRecord, ContinuityChallenge, ContinuityProof, SeedCommitmentRecord } from '../crypto/AgentIdentityService';
 import { AgentIdentityService } from '../crypto/AgentIdentityService';
-import { ArweaveIdentityStorage } from '../crypto/ArweaveIdentityStorage';
+import { SolanaIdentityStorage, type SolanaStorageConfig } from '../crypto/SolanaIdentityStorage';
 import type { Seed, PropagationResult, ProtocolRunner } from '../behavioral/PersistenceProtocol';
 import { hashSeed, evaluatePropagation } from '../behavioral/PersistenceProtocol';
 
@@ -64,11 +64,11 @@ export interface VerificationConfig {
 // ============================================================================
 
 export class CombinedVerifier {
-  private storage: ArweaveIdentityStorage;
+  private storage: SolanaIdentityStorage;
   private config: VerificationConfig;
 
-  constructor(config?: Partial<VerificationConfig>) {
-    this.storage = new ArweaveIdentityStorage();
+  constructor(solanaConfig: SolanaStorageConfig, config?: Partial<VerificationConfig>) {
+    this.storage = new SolanaIdentityStorage(solanaConfig);
     this.config = {
       divergenceThreshold: 0.35,
       challengeTimeoutMs: 300000, // 5 minutes
@@ -331,18 +331,23 @@ export class CombinedVerifier {
 // FACTORY AND HELPERS
 // ============================================================================
 
-export function createCombinedVerifier(config?: Partial<VerificationConfig>): CombinedVerifier {
-  return new CombinedVerifier(config);
+export function createCombinedVerifier(
+  solanaConfig: SolanaStorageConfig,
+  config?: Partial<VerificationConfig>
+): CombinedVerifier {
+  return new CombinedVerifier(solanaConfig, config);
 }
 
 /**
  * Quick verification helper.
+ * Note: Requires Solana connection to be passed for storage access.
  */
 export async function quickVerify(
+  solanaConfig: SolanaStorageConfig,
   agentDid: string,
   level: VerificationLevel = 'bound'
 ): Promise<boolean> {
-  const verifier = createCombinedVerifier();
+  const verifier = createCombinedVerifier(solanaConfig);
   const result = await verifier.verifyAgent(agentDid, level);
   return result.passed;
 }

@@ -11,7 +11,7 @@
 
 import { CombinedVerifier, createCombinedVerifier, type VerificationLevel, type CombinedChallenge, type CombinedProof } from '../unified/CombinedVerification';
 import { AgentIdentityService, type IdentityRecord } from '../crypto/AgentIdentityService';
-import { ArweaveIdentityStorage, createArweaveStorage } from '../crypto/ArweaveIdentityStorage';
+import { SolanaIdentityStorage, createSolanaStorage, type SolanaStorageConfig } from '../crypto/SolanaIdentityStorage';
 import { X402PaymentGateway, createPaymentGateway } from '../economic/x402PaymentGateway';
 import { getInfrastructureCostTracker } from '../economic/InfrastructureCostTracker';
 import type { Seed } from '../behavioral/PersistenceProtocol';
@@ -56,6 +56,7 @@ export interface SubmitProofResponse {
 
 export interface ChallengeServiceConfig {
   network: 'devnet' | 'mainnet';
+  solanaStorage: SolanaStorageConfig;
   challengeTimeoutMs?: number;
   divergenceThreshold?: number;
   paymentGateway?: X402PaymentGateway;
@@ -67,7 +68,7 @@ export interface ChallengeServiceConfig {
 
 export class ChallengeService {
   private verifier: CombinedVerifier;
-  private storage: ArweaveIdentityStorage;
+  private storage: SolanaIdentityStorage;
   private paymentGateway: X402PaymentGateway;
   private costTracker = getInfrastructureCostTracker();
 
@@ -82,12 +83,12 @@ export class ChallengeService {
   constructor(config: ChallengeServiceConfig) {
     this.challengeTimeoutMs = config.challengeTimeoutMs || 300000; // 5 minutes
 
-    this.verifier = createCombinedVerifier({
+    this.verifier = createCombinedVerifier(config.solanaStorage, {
       divergenceThreshold: config.divergenceThreshold || 0.35,
       challengeTimeoutMs: this.challengeTimeoutMs,
     });
 
-    this.storage = createArweaveStorage();
+    this.storage = createSolanaStorage(config.solanaStorage);
 
     this.paymentGateway = config.paymentGateway || createPaymentGateway({
       network: config.network,
@@ -101,8 +102,8 @@ export class ChallengeService {
   async createChallenge(request: CreateChallengeRequest): Promise<CreateChallengeResponse> {
     try {
       // Verify the target agent exists
-      const targetExists = await this.storage.getChainHead(request.targetDid);
-      if (!targetExists) {
+      const targetChain = await this.storage.getIdentityChain(request.targetDid);
+      if (targetChain.length === 0) {
         return {
           success: false,
           error: 'Target agent not found'
@@ -279,11 +280,11 @@ export class ChallengeService {
 
 export class ChallengeResponder {
   private identityService: AgentIdentityService;
-  private storage: ArweaveIdentityStorage;
+  private storage: SolanaIdentityStorage;
 
-  constructor(identityService: AgentIdentityService) {
+  constructor(identityService: AgentIdentityService, solanaConfig: SolanaStorageConfig) {
     this.identityService = identityService;
-    this.storage = createArweaveStorage();
+    this.storage = createSolanaStorage(solanaConfig);
   }
 
   /**
@@ -389,9 +390,10 @@ export function createChallengeService(
 }
 
 export function createChallengeResponder(
-  identityService: AgentIdentityService
+  identityService: AgentIdentityService,
+  solanaConfig: SolanaStorageConfig
 ): ChallengeResponder {
-  return new ChallengeResponder(identityService);
+  return new ChallengeResponder(identityService, solanaConfig);
 }
 
 export default ChallengeService;

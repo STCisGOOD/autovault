@@ -5,10 +5,10 @@
  * Helps determine if the system is economically self-sustaining.
  *
  * Monthly cost estimates:
- * - Arweave Storage: ~$5-20 (depends on data volume)
+ * - Solana Storage: ~$5-15 (depends on transaction volume)
  * - Vercel Hosting: ~$20
  * - RPC Node Access: ~$50
- * - Total: ~$75-100/month
+ * - Total: ~$75-85/month
  *
  * Break-even: ~25,000 verification requests/month at $0.001 each
  */
@@ -58,9 +58,9 @@ export interface UsageEvent {
 
 const DEFAULT_COSTS: CostCategory[] = [
   {
-    id: 'arweave',
-    name: 'Arweave Storage',
-    monthlyEstimate: 15,
+    id: 'solana_storage',
+    name: 'Solana Storage (Memos)',
+    monthlyEstimate: 10,
     actualThisMonth: 0,
     unit: 'USD'
   },

@@ -11,11 +11,15 @@
  * │                 UNIFIED AGENT IDENTITY                          │
  * ├─────────────────────────────────────────────────────────────────┤
  * │  CRYPTOGRAPHIC LAYER           │  BEHAVIORAL LAYER              │
- * │  - Ed25519 keypairs            │  - SEED documents              │
- * │  - Genesis delegation          │  - Divergence testing          │
- * │  - Arweave chain storage       │  - Weight evolution            │
+ * │  - Ed25519 keypairs            │  - N-dimensional weights       │
+ * │  - Genesis delegation          │  - Extended vocabulary         │
+ * │  - Anchor program storage      │  - PDE-based evolution         │
  * ├─────────────────────────────────────────────────────────────────┤
- * │  BINDING: SEED becomes a signed commitment in identity chain    │
+ * │  ON-CHAIN STORAGE (Anchor Program)                              │
+ * │  - PDA-based identity accounts                                  │
+ * │  - Declaration chain with signatures                            │
+ * │  - Pivotal experience hashes                                    │
+ * │  - Continuity proofs                                            │
  * ├─────────────────────────────────────────────────────────────────┤
  * │  ECONOMIC LAYER (x402)                                          │
  * │  - Devnet: Free + auto-airdrop tokens                          │
@@ -54,15 +58,64 @@ import { getInfrastructureCostTracker } from './economic/InfrastructureCostTrack
 import type { Seed } from './behavioral/PersistenceProtocol';
 
 // =============================================================================
+// CORE - Agent Runtime Interface & Identity Manager (LIBRARY API)
+// =============================================================================
+
+export {
+  // Agent runtime interface (what agents implement)
+  type AgentRuntime,
+  type ContextModifier,
+  type IdentityLifecycle,
+  type IdentityUpdateResult,
+  AgentAdapter,
+  // Experience mapping (ActionLog ↔ Weights semantics)
+  actionLogToExperience,
+  weightsToContextModifier,
+  // Identity manager (session lifecycle)
+  IdentityManager,
+  createIdentityManager,
+  type IdentityManagerConfig,
+} from './core';
+
+// =============================================================================
+// BOOTSTRAP - Zero-friction identity initialization (RECOMMENDED ENTRY POINT)
+// =============================================================================
+
+export {
+  // Main bootstrap
+  AgentIdentityBootstrap,
+  initializeAgentIdentity,
+  // Keypair management
+  KeypairManager,
+  createKeypairManager,
+  publicKeyToDid,
+  parseDid,
+  // Devnet funding
+  DevnetFunder,
+  createDevnetFunder,
+  // Solana storage backend (blockchain persistence)
+  SolanaStorageBackend,
+  createSolanaStorageBackend,
+  // Types
+  type BootstrapConfig,
+  type BootstrappedIdentity,
+  type KeypairManagerConfig,
+  type StoredKeypair,
+  type DevnetFunderConfig,
+  type FundingResult,
+  type SolanaStorageBackendConfig,
+} from './bootstrap';
+
+// =============================================================================
 // CRYPTO LAYER - Cryptographic identity
 // =============================================================================
 
 export {
   // Core service
   AgentIdentityService,
-  // Storage
-  ArweaveIdentityStorage,
-  createArweaveStorage,
+  // Storage (Solana-based)
+  SolanaIdentityStorage,
+  createSolanaStorage,
   agentIdentityExists,
   agentIdentityActive,
   // Genesis protocol
@@ -117,6 +170,21 @@ export {
   createLearningSystem,
   createMinimalSeed,
   mergSeeds,
+  // Extended vocabulary (N-dimensional identity)
+  DEFAULT_DIMENSIONS,
+  DEFI_DIMENSIONS,
+  createDefaultExtendedVocabulary,
+  createExtendedVocabulary,
+  extendVocabulary,
+  createDeFiVocabulary,
+  extractDimensionMetrics,
+  dimensionMetricsToExperience,
+  toSEEDFormat,
+  fromSEEDFormat,
+  validateVocabulary,
+  createExtendedIdentityBridge,
+  createExtendedBehavioralVocabulary,
+  isExtendedVocabulary,
   // Types
   type Seed,
   type Weight,
@@ -132,6 +200,13 @@ export {
   type LearningConfig,
   type LearningState,
   type EvolutionRecord,
+  type DimensionDefinition,
+  type DimensionCategory,
+  type MetricExtractor,
+  type DimensionMetricResult,
+  type ExtendedVocabulary,
+  type SEEDWeight,
+  type SEEDFormat,
 } from './behavioral';
 
 // =============================================================================
@@ -255,6 +330,9 @@ export async function createDevnetIdentitySystem(
       solanaConnection: connection,
       network: 'devnet',
     },
+    solanaStorage: {
+      connection,
+    },
     divergenceThreshold: 0.35,
   });
 }
@@ -264,7 +342,7 @@ export async function createDevnetIdentitySystem(
  */
 export async function createMainnetIdentitySystem(
   solanaRpcUrl: string,
-  arweaveWallet: any,
+  payerKeypair: any,
   payToAddress: string
 ) {
   const { Connection } = await import('@solana/web3.js');
@@ -280,10 +358,13 @@ export async function createMainnetIdentitySystem(
     identity: createUnifiedIdentityService({
       genesisConfig: {
         solanaConnection: connection,
-        arweaveWallet,
+        payer: payerKeypair,
         network: 'mainnet',
       },
-      arweaveWallet,
+      solanaStorage: {
+        connection,
+        payer: payerKeypair,
+      },
       divergenceThreshold: 0.35,
     }),
     payments: paymentGateway,
@@ -462,5 +543,184 @@ export async function quickStart(config: QuickStartConfig): Promise<QuickStartRe
   };
 }
 
-// Re-export Solana storage for direct use
-export { SolanaIdentityStorage, createSolanaStorage } from './crypto';
+// =============================================================================
+// ANCHOR STORAGE (On-chain PDA-based identity)
+// =============================================================================
+
+export {
+  AnchorStorageBackend,
+  createAnchorStorageBackend,
+  AGENT_IDENTITY_PROGRAM_ID,
+  MAX_DIMENSIONS,
+  MAX_STORED_DECLARATIONS,
+  WEIGHT_SCALE,
+  type AnchorStorageConfig,
+  type AnchorLoadResult,
+  type OnChainIdentity,
+  type OnChainDeclaration,
+} from './anchor';
+
+// =============================================================================
+// SOLANA KIT-FIRST STORAGE (Jan 2026 Stack)
+// =============================================================================
+
+export {
+  SolanaIdentityStorageKit,
+  createSolanaKitStorage,
+  agentIdentityExistsKit,
+  agentIdentityActiveKit,
+  type SolanaKitStorageConfig,
+} from './crypto/SolanaIdentityStorageKit';
+
+/**
+ * Quick start using @solana/kit (recommended Jan 2026 stack).
+ *
+ * Uses the official Solana Foundation framework-kit patterns.
+ */
+export async function quickStartKit(config: QuickStartConfig): Promise<QuickStartResult> {
+  const {
+    generateKeyPairSigner,
+    createSolanaRpc,
+    createSolanaRpcSubscriptions,
+    address,
+    lamports,
+  } = await import('@solana/kit');
+  const bs58 = await import('bs58');
+
+  const rpcUrl = config.rpcUrl || 'https://api.devnet.solana.com';
+  const wsUrl = rpcUrl.replace('https://', 'wss://').replace('http://', 'ws://');
+
+  const rpc = createSolanaRpc(rpcUrl);
+  const rpcSubscriptions = createSolanaRpcSubscriptions(wsUrl);
+
+  // Import required modules
+  const { AgentIdentityService } = await import('./crypto/AgentIdentityService');
+  const { generateAgentSubdomain } = await import('./crypto/GenesisProtocol');
+  const { SolanaIdentityStorageKit } = await import('./crypto/SolanaIdentityStorageKit');
+  const { hashSeed } = await import('./behavioral/PersistenceProtocol');
+
+  // Generate payer signer
+  const payerSigner = await generateKeyPairSigner();
+  console.log(`[quickStartKit] Generated payer: ${payerSigner.address}`);
+
+  // Airdrop 1 SOL for transactions
+  console.log('[quickStartKit] Requesting airdrop...');
+  const airdropSig = await rpc
+    .requestAirdrop(payerSigner.address, lamports(1_000_000_000n), { commitment: 'confirmed' })
+    .send();
+
+  // Wait for confirmation
+  let confirmed = false;
+  for (let i = 0; i < 30 && !confirmed; i++) {
+    await new Promise(r => setTimeout(r, 1000));
+    const { value } = await rpc.getSignatureStatuses([airdropSig]).send();
+    if (value[0]?.confirmationStatus === 'confirmed' || value[0]?.confirmationStatus === 'finalized') {
+      confirmed = true;
+    }
+  }
+  console.log('[quickStartKit] Airdrop confirmed');
+
+  // Get current slot for genesis block reference
+  const slot = await rpc.getSlot({ commitment: 'confirmed' }).send() as bigint;
+  const block = await rpc.getBlock(slot, { commitment: 'confirmed' }).send() as {
+    blockhash: string;
+    blockHeight: bigint;
+  } | null;
+
+  if (!block) {
+    throw new Error('Failed to fetch Solana block');
+  }
+
+  // Create identity service
+  const identityService = new AgentIdentityService();
+
+  // Create self-signed delegation
+  const subdomain = generateAgentSubdomain(config.name);
+  const delegatorPubkey = payerSigner.address;
+
+  const delegationWithoutSig = {
+    delegator: {
+      nft_address: 'self-signed-devnet',
+      wallet_pubkey: delegatorPubkey,
+      did: 'did:persistence:' + delegatorPubkey,
+    },
+    agent: {
+      name: config.name,
+      subdomain,
+      purpose: 'Persistent agent identity via Persistence Protocol (Kit-first)',
+      capabilities: ['persistence-protocol', 'solana-kit'],
+    },
+    genesis_block: {
+      chain: 'solana' as const,
+      block_height: Number(slot),
+      block_hash: block.blockhash,
+    },
+    created_at: Date.now(),
+    expires_at: null,
+  };
+
+  // Sign delegation using the signer
+  const { sign } = await import('@noble/ed25519');
+  const { utf8ToBytes } = await import('@noble/hashes/utils');
+  const message = JSON.stringify(delegationWithoutSig, Object.keys(delegationWithoutSig).sort());
+
+  // Extract private key from signer for signing
+  const keyPairBytes = await payerSigner.keyPair;
+  const signature = await sign(utf8ToBytes(message), keyPairBytes.privateKey.slice(0, 32));
+
+  const delegation = {
+    ...delegationWithoutSig,
+    delegator_signature: bs58.default.encode(signature),
+  };
+
+  // Initialize identity from delegation
+  const genesisRecord = await identityService.initializeFromGenesis(delegation);
+  const agentDid = identityService.getDID()!;
+  const agentPubkeyBase58 = identityService.getPublicKey()!;
+  const agentAddress = address(agentPubkeyBase58);
+
+  // Create Kit-based Solana storage
+  const storage = new SolanaIdentityStorageKit({
+    rpcEndpoint: rpcUrl,
+    wsEndpoint: wsUrl,
+    payer: payerSigner,
+    commitment: 'confirmed',
+  });
+
+  // Store genesis on Solana
+  console.log('[quickStartKit] Storing genesis on Solana...');
+  const { genesisTx } = await storage.storeGenesis(delegation, genesisRecord);
+  console.log(`[quickStartKit] Genesis stored: ${genesisTx}`);
+
+  // Store initial SEED if provided
+  if (config.seed) {
+    console.log('[quickStartKit] Storing initial SEED...');
+    await storage.storeSeed(agentDid, config.seed);
+    console.log('[quickStartKit] SEED stored');
+  }
+
+  console.log(`[quickStartKit] Identity created: ${agentDid}`);
+
+  // Return simple interface
+  return {
+    did: agentDid,
+    publicKey: agentPubkeyBase58,
+    genesisTx,
+
+    storeSeed: async (seed: Seed) => {
+      return storage.storeSeed(agentDid, seed);
+    },
+
+    getSeed: async () => {
+      return storage.getLatestSeed(agentDid);
+    },
+
+    getChain: async () => {
+      return storage.getIdentityChain(agentDid);
+    },
+
+    getBalance: async () => {
+      return storage.getBalance(agentAddress);
+    },
+  };
+}

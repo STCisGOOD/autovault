@@ -46,7 +46,7 @@ export interface GenesisDelegate {
 }
 
 export interface StorageReference {
-  arweave_tx?: string;
+  solana_tx?: string;
   ipfs_cid?: string;
 }
 
@@ -142,7 +142,7 @@ export interface SeedCommitmentRecord {
   sequence_number: number;
   seed_hash: string;           // SHA256 of the full SEED document
   seed_version: string;        // SEED version identifier
-  arweave_tx?: string;         // Where the full SEED is stored
+  solana_tx?: string;          // Where the full SEED is stored
   divergence_score?: number;   // Last measured divergence
   timestamp: number;
   agent_signature: string;
@@ -327,7 +327,7 @@ export class AgentIdentityService {
   async addSeedCommitment(
     seedHash: string,
     seedVersion: string,
-    arweaveTx?: string,
+    solanaTx?: string,
     divergenceScore?: number
   ): Promise<SeedCommitmentRecord> {
     if (!this.keypair) {
@@ -342,7 +342,7 @@ export class AgentIdentityService {
       sequence_number: this.getCurrentSequence() + 1,
       seed_hash: seedHash,
       seed_version: seedVersion,
-      arweave_tx: arweaveTx,
+      solana_tx: solanaTx,
       divergence_score: divergenceScore,
       timestamp: Date.now(),
     };

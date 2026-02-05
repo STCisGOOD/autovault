@@ -2,6 +2,12 @@
  * API Layer Exports
  *
  * HTTP endpoints for the agent identity system.
+ *
+ * Security Hardening:
+ * - API key authentication (auth.ts)
+ * - Timing-safe key comparison
+ * - Per-key rate limiting
+ * - Request audit logging
  */
 
 export {
@@ -38,3 +44,18 @@ export {
   type SubmitProofResponse,
   type ChallengeServiceConfig,
 } from './challenge';
+
+export {
+  AuthMiddleware,
+  createAuthMiddleware,
+  createDevnetAuthMiddleware,
+  createMainnetAuthMiddleware,
+  createExpressMiddleware,
+  hashApiKey,
+  generateApiKey,
+  getAuditLog,
+  getAuditLogForKey,
+  type AuthConfig,
+  type AuthResult,
+  type AuthenticatedRequest,
+} from './auth';

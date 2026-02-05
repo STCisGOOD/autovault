@@ -9,7 +9,7 @@
  * - Verification: $0.001 (verifies identity)
  * - Propagation Test: $0.005 (runs behavioral test)
  * - SEED Refinement: $0.002 (evolves SEED)
- * - Storage Gateway: $0.003/KB (Arweave storage)
+ * - Storage Gateway: $0.003/KB (Solana memo storage)
  */
 
 // ============================================================================
@@ -96,7 +96,7 @@ const DEFAULT_PRICES: Record<ServiceType, ServicePrice> = {
     service: 'storage_gateway',
     price: '$0.003/KB',
     priceUSDC: 0.003,
-    description: 'Store data on Arweave through the gateway'
+    description: 'Store data on Solana through memo transactions'
   }
 };
 
@@ -108,26 +108,30 @@ export class X402PaymentGateway {
   private config: PaymentConfig;
 
   constructor(config?: Partial<PaymentConfig>) {
+    // Deep clone DEFAULT_PRICES to avoid shared state mutation
+    const pricesCopy: Record<ServiceType, ServicePrice> = {} as any;
+    for (const [key, value] of Object.entries(DEFAULT_PRICES)) {
+      pricesCopy[key as ServiceType] = { ...value };
+    }
+
     this.config = {
       enabled: false,
       network: 'devnet',
       payToAddress: null,
       facilitatorUrl: 'https://x402.org/facilitator',
-      prices: DEFAULT_PRICES,
+      prices: pricesCopy,
       ...config
     };
   }
 
   /**
    * Check if payments are required for a service.
+   *
+   * Payments work on BOTH devnet and mainnet when enabled.
+   * On devnet, agents use faucet tokens to transact with each other.
+   * This enables testing agent-to-agent economics without real money.
    */
   requiresPayment(service: ServiceType): boolean {
-    // Devnet is always free
-    if (this.config.network === 'devnet') {
-      return false;
-    }
-
-    // Mainnet requires payment if enabled
     return this.config.enabled && this.config.payToAddress !== null;
   }
 
@@ -300,10 +304,10 @@ export class X402PaymentGateway {
       facilitator: this.config.facilitatorUrl,
       prices: priceStrings,
       note: this.config.enabled
-        ? 'Payments active - services require USDC micropayments'
-        : this.config.network === 'devnet'
-          ? 'Devnet mode - all services free'
-          : 'Payments not yet enabled - all services free during development',
+        ? this.config.network === 'devnet'
+          ? 'Devnet payments active - agents transact with faucet tokens'
+          : 'Mainnet payments active - services require real USDC'
+        : 'Payments not enabled - call enable(payToAddress) to activate',
     };
   }
 
