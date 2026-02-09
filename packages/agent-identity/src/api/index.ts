@@ -59,3 +59,16 @@ export {
   type AuthResult,
   type AuthenticatedRequest,
 } from './auth';
+
+export {
+  TrustService,
+  createTrustService,
+  createTrustHandler,
+  type TrustRequest,
+  type TrustResponse,
+  type BatchTrustRequest,
+  type BatchTrustResponse,
+  type TrustServiceConfig,
+  type SpamRisk,
+  type TrackRecord,
+} from './trust';

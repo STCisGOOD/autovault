@@ -17,6 +17,7 @@ import {
 } from '../utils/config';
 import {
   safeStringifyJson,
+  sha256,
 } from '../utils/security';
 import {
   error,
@@ -317,14 +318,7 @@ function describeWeight(dimension: string, value: number): string {
 }
 
 function hashInsight(text: string): string {
-  // Simple hash for privacy - in production, use proper crypto
-  let hash = 0;
-  for (let i = 0; i < text.length; i++) {
-    const char = text.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash = hash & hash; // Convert to 32bit integer
-  }
-  return Math.abs(hash).toString(16).padStart(8, '0');
+  return sha256(text).slice(0, 16);
 }
 
 // =============================================================================

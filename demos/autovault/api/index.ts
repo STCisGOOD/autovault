@@ -14,6 +14,7 @@
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { createHash } from 'crypto';
 import axios from 'axios';
 import {
   createReasoningTrace,
@@ -34,6 +35,7 @@ import {
 import { getPaymentStatus } from '../src/x402';
 import { calculateReputation, getReputationSummary } from '../src/reputation';
 import { recordHeartbeat, getHeartbeatStatus, incrementCycleCount, formatUptime } from '../src/heartbeat';
+import { handleStartPing, handleEndPing, getNetworkStats, validatePing } from '../src/network';
 import { getLearningStatus, loadWeights, adjustWeights, recordPrediction, exportLearningState } from '../src/learning';
 import { getTestSuite, TEST_PROMPTS, REFERENCE_RESPONSES, calculateOverallDivergence } from '../src/identity-test';
 import { getAllowedOrigins, isAllowedOrigin, getDefaultOrigin, getRateLimitConfig } from '../src/config';
@@ -301,6 +303,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           'GET /api/payments': 'x402 payment integration status',
           'GET /api/reputation': 'Agent reputation score and stats',
           'GET /api/heartbeat': 'Runtime accountability (record heartbeat)',
+          'POST /api/ping': 'Agent network telemetry (start/end session)',
+          'GET /api/network': 'Persistence network stats (live dashboard data)',
           'GET /api/about': 'The autonomous agent story'
         },
         links: {
@@ -694,14 +698,61 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
+    // Persistence Network - telemetry ping (nonce-bound + proof-of-work)
+    // No CORS header — agents call from server-side code (Node.js/Python),
+    // which doesn't use CORS. Omitting it blocks browser-based amplification
+    // attacks where a malicious webpage POSTs from every visitor's browser.
+    //
+    // IMPORTANT: No OPTIONS handler here is intentional. Without CORS headers
+    // on the OPTIONS preflight response, browsers block the actual POST.
+    // If someone adds a generic OPTIONS handler later (common in API frameworks),
+    // it could re-enable browser access. Do not add OPTIONS support for /api/ping.
+    if (path === '/api/ping') {
+      if (req.method !== 'POST') {
+        return res.status(405).json({ error: 'POST only' });
+      }
+
+      const validated = validatePing(req.body);
+      if (!validated) {
+        return res.status(400).json({ error: 'Invalid ping payload.' });
+      }
+
+      if (validated.type === 'start') {
+        const nonce = await handleStartPing(validated.ping);
+        return res.status(200).json({ ok: true, n: nonce });
+      }
+
+      // End ping — requires valid nonce + proof of work
+      // Hash IP for per-IP daily cap (we don't store raw IPs — privacy first)
+      const ipHash = createHash('sha256').update(clientIp).digest('hex').slice(0, 16);
+      const error = await handleEndPing(validated.ping, validated.nonce, validated.pow, ipHash);
+      if (error) {
+        return res.status(400).json({ error });
+      }
+
+      return res.status(200).json({ ok: true });
+    }
+
+    // Persistence Network - aggregate stats
+    if (path === '/api/network') {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      const stats = await getNetworkStats();
+      return res.status(200).json({
+        message: 'Persistence Network',
+        description: 'Live telemetry from agents using persistence-agent-identity. Performance improvement over baseline.',
+        stats,
+        dashboard: '/network',
+      });
+    }
+
     // 404
     return res.status(404).json({
       error: 'Not found',
-      availableEndpoints: ['/', '/api/status', '/api/yields', '/api/cycle', '/api/recommendation', '/api/history', '/api/about', '/api/memory', '/api/reputation', '/api/heartbeat', '/api/payments', '/api/learning']
+      availableEndpoints: ['/', '/api/status', '/api/yields', '/api/cycle', '/api/recommendation', '/api/history', '/api/about', '/api/memory', '/api/reputation', '/api/heartbeat', '/api/ping', '/api/network', '/api/payments', '/api/learning']
     });
 
   } catch (error) {
     console.error('API Error:', error);
-    return res.status(500).json({ error: 'Internal server error', message: String(error) });
+    return res.status(500).json({ error: 'Internal server error' });
   }
 }

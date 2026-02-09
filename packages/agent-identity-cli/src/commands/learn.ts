@@ -21,6 +21,7 @@ import {
   info,
   colors,
 } from '../utils/display';
+import { detectDimension } from '../utils/dimensions';
 
 // =============================================================================
 // COMMAND DEFINITION
@@ -39,39 +40,6 @@ export function createLearnCommand(): Command {
     });
 
   return cmd;
-}
-
-// =============================================================================
-// DIMENSION DETECTION
-// =============================================================================
-
-/**
- * Auto-detect dimension from insight text.
- */
-function detectDimension(insight: string): string {
-  const lower = insight.toLowerCase();
-
-  // Curiosity patterns
-  if (/\b(explor|investigat|dig|search|read|look|discover|learn|context|understand|research|found)\b/.test(lower)) {
-    return 'curiosity';
-  }
-
-  // Precision patterns
-  if (/\b(test|verif|check|confirm|build|lint|type|bug|fix|correct|accura|validat|error|stack)\b/.test(lower)) {
-    return 'precision';
-  }
-
-  // Persistence patterns
-  if (/\b(retry|persist|alternat|try|fail|attempt|keep|workaround|eventually|finally)\b/.test(lower)) {
-    return 'persistence';
-  }
-
-  // Empathy patterns
-  if (/\b(user|clarif|explain|prefer|adapt|question|communicat|style|want|need)\b/.test(lower)) {
-    return 'empathy';
-  }
-
-  return 'general';
 }
 
 // =============================================================================

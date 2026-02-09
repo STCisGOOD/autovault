@@ -44,6 +44,7 @@ interface ClaudeCodeSettings {
     SessionStart?: ClaudeCodeMatcher[];
     PreToolUse?: ClaudeCodeMatcher[];
     PostToolUse?: ClaudeCodeMatcher[];
+    SessionEnd?: ClaudeCodeMatcher[];
     Stop?: ClaudeCodeMatcher[];
   };
   [key: string]: unknown;
@@ -175,12 +176,12 @@ function cleanupOldBackups(dir: string, keep: number = 5): void {
 function detectExistingHooks(settings: ClaudeCodeSettings): {
   hasSessionStart: boolean;
   hasPostToolUse: boolean;
-  hasStop: boolean;
+  hasSessionEnd: boolean;
 } {
   const result = {
     hasSessionStart: false,
     hasPostToolUse: false,
-    hasStop: false,
+    hasSessionEnd: false,
   };
 
   if (!settings.hooks) {
@@ -211,12 +212,12 @@ function detectExistingHooks(settings: ClaudeCodeSettings): {
     }
   }
 
-  // Check Stop
-  if (settings.hooks.Stop) {
-    for (const matcher of settings.hooks.Stop) {
+  // Check SessionEnd (NOT Stop — Stop fires per-turn, SessionEnd fires per-session)
+  if (settings.hooks.SessionEnd) {
+    for (const matcher of settings.hooks.SessionEnd) {
       for (const hook of matcher.hooks) {
         if (hook.command?.includes(HOOK_IDENTIFIER)) {
-          result.hasStop = true;
+          result.hasSessionEnd = true;
           break;
         }
       }
@@ -237,11 +238,12 @@ function removeOurHooks(settings: ClaudeCodeSettings): ClaudeCodeSettings {
   const newSettings = { ...settings };
   newSettings.hooks = { ...settings.hooks };
 
-  // Filter out our hooks from each event type
+  // Filter out our hooks from each event type (includes legacy Stop + new SessionEnd)
   const eventTypes: Array<keyof NonNullable<ClaudeCodeSettings['hooks']>> = [
     'SessionStart',
     'PreToolUse',
     'PostToolUse',
+    'SessionEnd',
     'Stop',
   ];
 
@@ -308,14 +310,14 @@ function createOurHooks(): NonNullable<ClaudeCodeSettings['hooks']> {
         ],
       },
     ],
-    Stop: [
+    SessionEnd: [
       {
         matcher: '*',
         hooks: [
           {
             type: 'command',
             command: `${HOOK_COMMAND_BASE} session-end`,
-            timeout: HOOK_TIMEOUT,
+            timeout: 15000, // ARIL backward pass needs more time than simple hooks
           },
         ],
       },
@@ -386,7 +388,7 @@ export async function installClaudeCodeHooks(
     // Check for existing hooks
     const existing = detectExistingHooks(settings);
     const alreadyInstalled =
-      existing.hasSessionStart && existing.hasPostToolUse && existing.hasStop;
+      existing.hasSessionStart && existing.hasPostToolUse && existing.hasSessionEnd;
 
     if (alreadyInstalled && !options.force) {
       return {
@@ -474,7 +476,7 @@ export function areClaudeCodeHooksInstalled(): boolean {
   try {
     const settings = loadClaudeCodeSettings();
     const existing = detectExistingHooks(settings);
-    return existing.hasSessionStart && existing.hasPostToolUse && existing.hasStop;
+    return existing.hasSessionStart && existing.hasPostToolUse && existing.hasSessionEnd;
   } catch {
     return false;
   }

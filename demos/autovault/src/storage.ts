@@ -16,7 +16,12 @@ import { kv } from '@vercel/kv';
 export interface StorageBackend {
   get<T>(key: string): Promise<T | null>;
   set<T>(key: string, value: T): Promise<void>;
+  /** Set with TTL (seconds). Key auto-expires after ttlSeconds. */
+  setWithTTL<T>(key: string, value: T, ttlSeconds: number): Promise<void>;
   delete(key: string): Promise<void>;
+  /** Atomic delete-and-check: returns true if key existed (was deleted).
+   *  Used for single-use token consumption — only the first caller gets true. */
+  tryDelete(key: string): Promise<boolean>;
   keys(pattern?: string): Promise<string[]>;
   isPersistent(): boolean;
 }
@@ -43,11 +48,29 @@ class VercelKVStorage implements StorageBackend {
     }
   }
 
+  async setWithTTL<T>(key: string, value: T, ttlSeconds: number): Promise<void> {
+    try {
+      await kv.set(this.prefix + key, value, { ex: ttlSeconds });
+    } catch (error) {
+      console.error('[Storage] KV setWithTTL error:', error);
+    }
+  }
+
   async delete(key: string): Promise<void> {
     try {
       await kv.del(this.prefix + key);
     } catch (error) {
       console.error('[Storage] KV delete error:', error);
+    }
+  }
+
+  async tryDelete(key: string): Promise<boolean> {
+    try {
+      const count = await kv.del(this.prefix + key);
+      return count > 0;
+    } catch (error) {
+      console.error('[Storage] KV tryDelete error:', error);
+      return false;
     }
   }
 
@@ -70,6 +93,7 @@ class VercelKVStorage implements StorageBackend {
 
 class InMemoryStorage implements StorageBackend {
   private store: Map<string, any> = new Map();
+  private ttlTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
 
   async get<T>(key: string): Promise<T | null> {
     return this.store.get(key) || null;
@@ -79,8 +103,27 @@ class InMemoryStorage implements StorageBackend {
     this.store.set(key, value);
   }
 
+  async setWithTTL<T>(key: string, value: T, ttlSeconds: number): Promise<void> {
+    this.store.set(key, value);
+    const existing = this.ttlTimers.get(key);
+    if (existing) clearTimeout(existing);
+    this.ttlTimers.set(key, setTimeout(() => {
+      this.store.delete(key);
+      this.ttlTimers.delete(key);
+    }, ttlSeconds * 1000));
+  }
+
   async delete(key: string): Promise<void> {
     this.store.delete(key);
+    const timer = this.ttlTimers.get(key);
+    if (timer) { clearTimeout(timer); this.ttlTimers.delete(key); }
+  }
+
+  async tryDelete(key: string): Promise<boolean> {
+    // Single-threaded JS: no race here. Map.delete returns true if key existed.
+    const timer = this.ttlTimers.get(key);
+    if (timer) { clearTimeout(timer); this.ttlTimers.delete(key); }
+    return this.store.delete(key);
   }
 
   async keys(pattern?: string): Promise<string[]> {
@@ -124,7 +167,9 @@ export function getStorage(): StorageBackend {
 export const storage = {
   get: <T>(key: string) => getStorage().get<T>(key),
   set: <T>(key: string, value: T) => getStorage().set<T>(key, value),
+  setWithTTL: <T>(key: string, value: T, ttlSeconds: number) => getStorage().setWithTTL<T>(key, value, ttlSeconds),
   delete: (key: string) => getStorage().delete(key),
+  tryDelete: (key: string) => getStorage().tryDelete(key),
   keys: (pattern?: string) => getStorage().keys(pattern),
   isPersistent: () => getStorage().isPersistent(),
 };

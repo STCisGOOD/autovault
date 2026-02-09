@@ -112,6 +112,7 @@ export interface StoredSelf {
   readonly continuityProof: ContinuityProof;
   readonly currentState: SelfState;
   readonly params: DynamicsParams;
+  readonly latestActionLogHash?: string;
 }
 
 /**

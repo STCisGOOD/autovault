@@ -276,8 +276,9 @@ export class IdentityBridge {
   private state: SelfState;
   private declarations: Declaration[];
   private pivotalExperiences: PivotalExperience[] = [];
+  private latestActionLogHash: string | undefined;
   private readonly vocabulary: Vocabulary;
-  private readonly params: DynamicsParams;
+  private params: DynamicsParams;
   private readonly config: BridgeConfig;
   private readonly llm: LLMInterface | null;
 
@@ -463,17 +464,21 @@ export class IdentityBridge {
       return true;
     }
 
-    // Check confidence threshold
-    if (insight.confidence < this.config.declarationThreshold) {
-      return false;
-    }
-
     // Check if there's sufficient discrepancy
     const relevantDisc = discrepancies.find(
       d => d.dimensionIndex === insight.dimensionIndex
     );
 
     if (!relevantDisc) {
+      return false;
+    }
+
+    // Major behavioral shifts use a lower confidence threshold
+    const threshold = relevantDisc.significance === 'major'
+      ? this.config.declarationThreshold * 0.5
+      : this.config.declarationThreshold;
+
+    if (insight.confidence < threshold) {
       return false;
     }
 
@@ -566,6 +571,49 @@ export class IdentityBridge {
     return this.vocabulary;
   }
 
+  getParams(): DynamicsParams {
+    return this.params;
+  }
+
+  setLatestActionLogHash(hash: string): void {
+    this.latestActionLogHash = hash;
+  }
+
+  /**
+   * Update dynamics parameters by reconstructing the params object.
+   * Only the specified fields are changed; others retain their values.
+   * Used for adaptive barrier updates between sessions.
+   */
+  updateParams(updates: Partial<DynamicsParams>): void {
+    this.params = {
+      D: updates.D ?? this.params.D,
+      lambda: updates.lambda ?? this.params.lambda,
+      mu: updates.mu ?? this.params.mu,
+      kappa: updates.kappa ?? this.params.kappa,
+      a: updates.a ?? this.params.a,
+      w_star: updates.w_star ?? this.params.w_star,
+    };
+  }
+
+  /**
+   * Update internal state weights without creating a declaration.
+   * Used for consolidated initialization from ARIL snapshots.
+   *
+   * Sets m = w intentionally: the consolidated weights become the
+   * coherence target for this session, zeroing the coherence term
+   * λ_C · ‖w - m‖² at initialization. If the LLM pipeline later
+   * produces declarations that update m, the coherence term kicks
+   * back in naturally.
+   */
+  setState(newW: Float64Array): void {
+    this.state = {
+      dimension: this.state.dimension,
+      w: new Float64Array(newW),
+      m: new Float64Array(newW),
+      time: this.state.time,
+    };
+  }
+
   /**
    * Export the current identity for persistence.
    */
@@ -588,6 +636,7 @@ export class IdentityBridge {
       continuityProof,
       currentState: this.state,
       params: this.params,
+      latestActionLogHash: this.latestActionLogHash,
     };
   }
 

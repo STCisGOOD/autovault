@@ -21,7 +21,8 @@ export type ServiceType =
   | 'verification'
   | 'propagation_test'
   | 'seed_refinement'
-  | 'storage_gateway';
+  | 'storage_gateway'
+  | 'trust';  // Trust score lookup
 
 export type NetworkMode = 'devnet' | 'mainnet';
 
@@ -97,6 +98,12 @@ const DEFAULT_PRICES: Record<ServiceType, ServicePrice> = {
     price: '$0.003/KB',
     priceUSDC: 0.003,
     description: 'Store data on Solana through memo transactions'
+  },
+  trust: {
+    service: 'trust',
+    price: '$0.0005',
+    priceUSDC: 0.0005,
+    description: 'Get trust score for a pubkey'
   }
 };
 

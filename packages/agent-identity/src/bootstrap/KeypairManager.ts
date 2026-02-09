@@ -15,6 +15,11 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import bs58 from 'bs58';
+import {
+  encrypt as sharedEncrypt,
+  decrypt as sharedDecrypt,
+  deriveMachinePassword as sharedDeriveMachinePassword,
+} from './encryption';
 
 // =============================================================================
 // TYPES
@@ -52,45 +57,10 @@ const DEFAULT_CONFIG: KeypairManagerConfig = {
 
 /**
  * Derive a machine-specific password for encrypting keys.
- *
- * This uses multiple system fingerprints to create a password that:
- * - Is unique to this machine
- * - Cannot be easily guessed
- * - Survives across reboots
- *
- * For additional security, users can set PERSISTENCE_AGENT_PASSWORD env var.
+ * Delegates to the shared encryption module.
  */
 function deriveMachinePassword(): string {
-  // Check for explicit password first
-  const envPassword = process.env.PERSISTENCE_AGENT_PASSWORD;
-  if (envPassword) {
-    return envPassword;
-  }
-
-  // Derive from machine characteristics
-  const os = require('os');
-  const fingerprints = [
-    os.hostname(),
-    os.homedir(),
-    os.platform(),
-    os.arch(),
-    // CPU info (stable across reboots)
-    JSON.stringify(os.cpus()[0]?.model || 'unknown'),
-    // Network interface MAC addresses (stable)
-    Object.values(os.networkInterfaces())
-      .flat()
-      .filter((iface: any) => !iface?.internal && iface?.mac)
-      .map((iface: any) => iface.mac)
-      .sort()
-      .join(','),
-  ].join('|');
-
-  // Hash the fingerprints to create a stable password
-  const hash = crypto.createHash('sha256').update(fingerprints).digest('hex');
-
-  // Add a static salt to make rainbow tables useless
-  const salted = `persistence-agent-v1:${hash}`;
-  return crypto.createHash('sha256').update(salted).digest('base64');
+  return sharedDeriveMachinePassword();
 }
 
 // =============================================================================
@@ -128,45 +98,18 @@ export function parseDid(did: string): {
 // ENCRYPTION
 // =============================================================================
 
+/**
+ * Encrypt a secret key. Delegates to shared encryption module.
+ */
 function encryptSecretKey(secretKey: Uint8Array, password: string): string {
-  const salt = crypto.randomBytes(16);
-  const key = crypto.scryptSync(password, salt, 32);
-  const iv = crypto.randomBytes(16);
-  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
-
-  const encrypted = Buffer.concat([
-    cipher.update(Buffer.from(secretKey)),
-    cipher.final(),
-  ]);
-
-  const authTag = cipher.getAuthTag();
-
-  return JSON.stringify({
-    salt: salt.toString('hex'),
-    iv: iv.toString('hex'),
-    authTag: authTag.toString('hex'),
-    data: encrypted.toString('hex'),
-  });
+  return sharedEncrypt(secretKey, password);
 }
 
+/**
+ * Decrypt a secret key. Delegates to shared encryption module.
+ */
 function decryptSecretKey(encryptedData: string, password: string): Uint8Array {
-  const { salt, iv, authTag, data } = JSON.parse(encryptedData);
-
-  const key = crypto.scryptSync(password, Buffer.from(salt, 'hex'), 32);
-  const decipher = crypto.createDecipheriv(
-    'aes-256-gcm',
-    key,
-    Buffer.from(iv, 'hex')
-  );
-
-  decipher.setAuthTag(Buffer.from(authTag, 'hex'));
-
-  const decrypted = Buffer.concat([
-    decipher.update(Buffer.from(data, 'hex')),
-    decipher.final(),
-  ]);
-
-  return new Uint8Array(decrypted);
+  return sharedDecrypt(encryptedData, password);
 }
 
 // =============================================================================
@@ -336,7 +279,7 @@ export class KeypairManager {
       console.log(`[KeypairManager] Saved to ${this.getStoragePath()}`);
     }
 
-    fs.writeFileSync(this.getStoragePath(), JSON.stringify(stored, null, 2));
+    fs.writeFileSync(this.getStoragePath(), JSON.stringify(stored, null, 2), { mode: 0o600 });
   }
 
   /**
@@ -376,7 +319,7 @@ export class KeypairManager {
       };
 
       // Write migrated file
-      fs.writeFileSync(storagePath, JSON.stringify(migrated, null, 2));
+      fs.writeFileSync(storagePath, JSON.stringify(migrated, null, 2), { mode: 0o600 });
       console.log('[KeypairManager] ✅ Migrated to encrypted storage');
       return true;
     } catch (error) {

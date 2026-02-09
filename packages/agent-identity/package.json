@@ -1,6 +1,6 @@
 {
   "name": "persistence-agent-identity",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Self-sustaining agent identity system - combining cryptographic identity with behavioral identity through the Persistence Protocol",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

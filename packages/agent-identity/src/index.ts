@@ -152,6 +152,9 @@ export {
 // =============================================================================
 
 export {
+  // Identity persistence (save/load behavioral state)
+  IdentityPersistence,
+  createIdentityPersistence,
   // Core protocol
   calculateDivergence,
   evaluatePropagation,
@@ -207,6 +210,28 @@ export {
   type ExtendedVocabulary,
   type SEEDWeight,
   type SEEDFormat,
+  // ARIL core (behavioral identity learning)
+  createUnifiedIdentity,
+  type UnifiedIdentityConfig as BehavioralUnifiedIdentityConfig,
+  type ObservationResult,
+  type StorageBackend,
+  // Strategy features (ARIL v2)
+  extractStrategyFeatures,
+  featuresToArray,
+  arrayToFeatures,
+  renderStrategies,
+  STRATEGY_FEATURE_NAMES,
+  DEFAULT_STRATEGY_FEATURE_CONFIG,
+  DEFAULT_RENDER_CONFIG,
+  type StrategyFeatures,
+  type StrategyFeatureName,
+  type StrategyFeatureConfig,
+  type StrategyRenderInput,
+  type StrategyRenderConfig,
+  type StrategyDocument,
+  type RenderedStrategy,
+  type InteractionTerm,
+  type DimensionAttribution,
 } from './behavioral';
 
 // =============================================================================
@@ -313,7 +338,7 @@ export {
 // PACKAGE INFO
 // =============================================================================
 
-export const VERSION = '0.2.0';
+export const VERSION = '0.3.0';
 export const PACKAGE_NAME = 'persistence-agent-identity';
 
 /**

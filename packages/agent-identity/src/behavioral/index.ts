@@ -226,3 +226,135 @@ export {
   // Validation
   validateVocabulary,
 } from './VocabularyExtension';
+
+// ARIL - Adjoint-Replicator Identity Learning
+// The backward pass across the session boundary
+export {
+  computeEnergyGradient,
+  computeEnergyOnly,
+  verifyGradient,
+  type EnergyGradientResult,
+} from './EnergyGradient';
+
+export {
+  OutcomeEvaluator,
+  extractTestSignal,
+  extractSessionArcSignal,
+  isVerifyCommand,
+  DEFAULT_OUTCOME_CONFIG,
+  type SessionOutcome,
+  type OutcomeSignal,
+  type OutcomeEvaluatorState,
+  type OutcomeEvaluatorConfig,
+} from './OutcomeEvaluator';
+
+export {
+  computeShapleyAttribution,
+  createCorrelationHistory,
+  updateCorrelationHistory,
+  DEFAULT_SHAPLEY_CONFIG,
+  type DimensionAttribution,
+  type AttributionResult,
+  type CorrelationHistory,
+  type ShapleyConfig,
+} from './ShapleyAttributor';
+
+export {
+  createARILState,
+  computeARILUpdate,
+  applyARILUpdate,
+  verifyReplicatorConservation,
+  serializeARILState,
+  deserializeARILState,
+  DEFAULT_ARIL_CONFIG,
+  type ARILConfig,
+  type ARILState,
+  type ARILUpdate,
+  type SerializedARILState,
+} from './ReplicatorOptimizer';
+
+export {
+  ConfidenceCalibrator,
+  serializeCalibrationState,
+  deserializeCalibrationState,
+  DEFAULT_CALIBRATOR_CONFIG,
+  type CalibrationState,
+  type CalibrationRecord,
+  type CalibratorConfig,
+  type SerializedCalibrationState,
+} from './ConfidenceCalibrator';
+
+export {
+  InsightCompiler,
+  serializeCompilerState,
+  DEFAULT_COMPILER_CONFIG,
+  type CompiledPattern,
+  type CompilerConfig,
+  type SerializedCompilerState,
+} from './InsightCompiler';
+
+export {
+  GuidanceEngine,
+  DEFAULT_GUIDANCE_CONFIG,
+  type BehavioralDirective,
+  type GuidanceOutput,
+  type GuidanceConfig,
+} from './GuidanceEngine';
+
+export {
+  DomainTracker,
+  serializeDomainProfile,
+  deserializeDomainProfile,
+  DEFAULT_DOMAIN_CONFIG,
+  type DomainExposure,
+  type Specialization,
+  type DomainProfile,
+  type DomainTrackerConfig,
+  type SerializedDomainProfile,
+} from './DomainTracker';
+
+// Strategy Feature Extractor — v2 behavioral strategy metrics from tool-call sequences
+export {
+  extractStrategyFeatures,
+  featuresToArray,
+  arrayToFeatures,
+  computeReadBeforeEdit,
+  computeTestAfterChange,
+  computeContextGathering,
+  computeOutputVerification,
+  computeErrorRecoverySpeed,
+  normalizePath,
+  extractFilePath,
+  isTestCommand,
+  DEFAULT_STRATEGY_FEATURE_CONFIG,
+  STRATEGY_FEATURE_NAMES,
+  type StrategyFeatures,
+  type StrategyFeatureName,
+  type StrategyFeatureConfig,
+} from './StrategyFeatureExtractor';
+
+// Strategy Renderer — v2 hybrid procedural+empirical output for .aril/strategies.md
+export {
+  renderStrategies,
+  DEFAULT_RENDER_CONFIG,
+  type StrategyRenderInput,
+  type StrategyRenderConfig,
+  type RenderedStrategy,
+  type StrategyDocument,
+  type InteractionTerm,
+} from './StrategyRenderer';
+
+// Mode Observer — Layer 3 read-only observer of ARIL dynamics
+export {
+  ModeObserver,
+  computeAdaptiveBarrier,
+  serializeObserverHistory,
+  deserializeObserverHistory,
+  DEFAULT_OBSERVER_CONFIG,
+  type ModeObservation,
+  type DimensionMode,
+  type DimensionTunneling,
+  type ModeObserverConfig,
+  type ObserverHistory,
+  type SerializedObserverHistory,
+} from './ModeObserver';

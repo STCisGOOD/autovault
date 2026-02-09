@@ -138,7 +138,7 @@ async function handleClaudeCode(options: InstallHooksOptions): Promise<void> {
 Hooks installed for:
   • ${colors.secondary('SessionStart')} - Identity loaded at session start
   • ${colors.secondary('PostToolUse')}  - Tool calls tracked (async)
-  • ${colors.secondary('Stop')}         - Session insights processed
+  • ${colors.secondary('SessionEnd')}   - Session insights processed
 
 Settings: ${colors.muted(settingsPath)}`,
       'Hooks Installed'

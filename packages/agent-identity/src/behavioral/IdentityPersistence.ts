@@ -89,6 +89,7 @@ function serializeStoredSelf(stored: StoredSelf): Record<string, unknown> {
       ...stored.params,
       w_star: Array.from(stored.params.w_star),
     },
+    ...(stored.latestActionLogHash ? { latestActionLogHash: stored.latestActionLogHash } : {}),
   };
 }
 
@@ -135,6 +136,7 @@ function deserializeStoredSelf(data: Record<string, unknown>): StoredSelf {
       ...params,
       w_star: Float64Array.from(params.w_star),
     },
+    ...(data.latestActionLogHash ? { latestActionLogHash: data.latestActionLogHash as string } : {}),
   };
 }
 
@@ -467,14 +469,15 @@ export class IdentityPersistence {
         }
       }
 
-      // Reconstruct the bridge from stored state
+      // Reconstruct the bridge from stored state (including pivotal experiences)
       this.bridge = new IdentityBridge(
         stored.currentState,
         stored.vocabulary,
         stored.params,
         this.bridgeConfig,
         this.llm,
-        stored.declarations
+        stored.declarations,
+        stored.pivotalExperiences || []
       );
 
       console.log(

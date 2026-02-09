@@ -206,24 +206,32 @@ export const rateLimiter = new RateLimiter();
 /**
  * Express/Vercel middleware helper
  *
- * Extracts client IP from request headers (handles proxies)
+ * Extracts client IP from request headers (handles proxies).
+ *
+ * Security: x-real-ip is preferred because Vercel sets it to the
+ * actual client IP and it cannot be spoofed by the client.
+ * x-forwarded-for CAN be spoofed — a client can prepend fake IPs,
+ * and the code would use the fake one as the "client" IP, bypassing
+ * rate limiting entirely. We only fall back to x-forwarded-for when
+ * x-real-ip is absent (non-Vercel environments).
  */
 export function getClientIp(headers: Record<string, string | string[] | undefined>): string {
-  // Check common proxy headers
-  const forwardedFor = headers['x-forwarded-for'];
-  if (forwardedFor) {
-    // x-forwarded-for can be a comma-separated list; take the first (original client)
-    const ips = Array.isArray(forwardedFor) ? forwardedFor[0] : forwardedFor;
-    const firstIp = ips.split(',')[0].trim();
-    if (firstIp) return firstIp;
-  }
-
+  // Prefer x-real-ip — set by Vercel/nginx, not spoofable by clients
   const realIp = headers['x-real-ip'];
   if (realIp) {
-    return Array.isArray(realIp) ? realIp[0] : realIp;
+    const ip = Array.isArray(realIp) ? realIp[0] : realIp;
+    if (ip) return ip.trim();
   }
 
-  // Fallback
+  // Fallback to x-forwarded-for (take LAST IP — most recently added by trusted proxy)
+  const forwardedFor = headers['x-forwarded-for'];
+  if (forwardedFor) {
+    const ips = Array.isArray(forwardedFor) ? forwardedFor[0] : forwardedFor;
+    const parts = ips.split(',').map(s => s.trim()).filter(Boolean);
+    // Last IP is added by the edge proxy (trusted), first may be client-spoofed
+    if (parts.length > 0) return parts[parts.length - 1];
+  }
+
   return 'unknown';
 }
 

@@ -146,8 +146,8 @@ export class FileSystemPrivateStorage implements PrivateStorageBackend {
     this.baseDir = config.baseDir || this.getDefaultBaseDir();
     this.prettyPrint = config.prettyPrint ?? false;
 
-    // Sanitize DID for filesystem
-    const safeDid = config.agentDid.replace(/[^a-zA-Z0-9-_:]/g, '_');
+    // Sanitize DID for filesystem — colons are illegal in Windows paths
+    const safeDid = config.agentDid.replace(/[^a-zA-Z0-9-_]/g, '_');
     this.agentDir = path.join(this.baseDir, safeDid, 'private');
     this.logsDir = path.join(this.agentDir, 'action-logs');
     this.indexPath = path.join(this.agentDir, 'index.json');
@@ -196,7 +196,7 @@ export class FileSystemPrivateStorage implements PrivateStorageBackend {
     const content = this.prettyPrint
       ? JSON.stringify(stored, null, 2)
       : JSON.stringify(stored);
-    fs.writeFileSync(logPath, content, 'utf-8');
+    fs.writeFileSync(logPath, content, { encoding: 'utf-8', mode: 0o600 });
 
     // Update index
     index.hashes.push(hash);
@@ -420,7 +420,7 @@ export class FileSystemPrivateStorage implements PrivateStorageBackend {
     const content = this.prettyPrint
       ? JSON.stringify(index, null, 2)
       : JSON.stringify(index);
-    fs.writeFileSync(this.indexPath, content, 'utf-8');
+    fs.writeFileSync(this.indexPath, content, { encoding: 'utf-8', mode: 0o600 });
   }
 }
 

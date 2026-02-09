@@ -64,8 +64,9 @@ export const MAX_DIMENSIONS = 16;
 
 /**
  * Maximum stored declarations on-chain.
+ * Reduced from 32 to 4 to fit within account size limits.
  */
-export const MAX_STORED_DECLARATIONS = 32;
+export const MAX_STORED_DECLARATIONS = 4;
 
 /**
  * Weight scaling factor (0.5 = 5000, 1.0 = 10000).
@@ -121,7 +122,7 @@ export interface OnChainDeclaration {
   timestamp: number;
   previousHash: Uint8Array;
   signature: Uint8Array;
-  content: string;
+  contentHash: Uint8Array;
 }
 
 // =============================================================================
@@ -408,11 +409,14 @@ export class AnchorStorageBackend {
       sigBytes = new Uint8Array(64);
     }
 
+    // Hash the content for on-chain storage (content_hash: [u8; 32])
+    const contentHash = sha256(Buffer.from(declaration.content));
+
     const data = Buffer.concat([
       Buffer.from(discriminator),
       Buffer.from([declaration.index]),
       this.serializeU64(Math.round(declaration.value * WEIGHT_SCALE)),
-      this.serializeString(declaration.content.slice(0, 256)),
+      Buffer.from(contentHash),
       Buffer.from(sigBytes),
     ]);
 
@@ -452,6 +456,103 @@ export class AnchorStorageBackend {
       programId: this.programId,
       data,
     });
+  }
+
+  /**
+   * Build the evolve instruction — update on-chain weights with ARIL delta.
+   * Sends new weights and a timestamp for the evolution step.
+   */
+  buildEvolveInstruction(
+    pda: PublicKey,
+    newWeights: number[],
+    fitness?: number[]
+  ): TransactionInstruction {
+    const discriminator = sha256(Buffer.from('global:evolve')).slice(0, 8);
+
+    // Serialize weights as Vec<i64> (signed, scaled)
+    const weightBuffers = newWeights.map(w => {
+      const buf = Buffer.alloc(8);
+      buf.writeBigInt64LE(BigInt(Math.round(w * WEIGHT_SCALE)));
+      return buf;
+    });
+
+    const parts: Buffer[] = [
+      Buffer.from(discriminator),
+      this.serializeVec(weightBuffers),
+      this.serializeU64(Date.now()),
+    ];
+
+    // Optional: append fitness scores if provided
+    if (fitness && fitness.length > 0) {
+      const fitnessBuffers = fitness.map(f => {
+        const buf = Buffer.alloc(8);
+        buf.writeBigInt64LE(BigInt(Math.round(f * WEIGHT_SCALE)));
+        return buf;
+      });
+      parts.push(this.serializeVec(fitnessBuffers));
+    }
+
+    const data = Buffer.concat(parts);
+
+    return new TransactionInstruction({
+      keys: [
+        { pubkey: pda, isSigner: false, isWritable: true },
+        { pubkey: this.payer.publicKey, isSigner: true, isWritable: false },
+      ],
+      programId: this.programId,
+      data,
+    });
+  }
+
+  /**
+   * Build a verify instruction — read-only integrity check via simulateTransaction.
+   * Returns whether on-chain state matches expected hash.
+   */
+  async verify(expectedMerkleRoot?: string): Promise<{
+    valid: boolean;
+    onChainRoot: string;
+    error?: string;
+  }> {
+    const result = await this.load();
+    if (!result.found || !result.self) {
+      return { valid: false, onChainRoot: '', error: result.error || 'No identity on-chain' };
+    }
+
+    const onChainRoot = result.self.continuityProof.merkleRoot;
+
+    if (expectedMerkleRoot) {
+      const valid = onChainRoot === expectedMerkleRoot;
+      return {
+        valid,
+        onChainRoot,
+        error: valid ? undefined : `Merkle root mismatch: expected ${expectedMerkleRoot.slice(0, 16)}..., got ${onChainRoot.slice(0, 16)}...`,
+      };
+    }
+
+    return { valid: true, onChainRoot };
+  }
+
+  /**
+   * Evolve weights on-chain using ARIL update.
+   */
+  async evolve(newWeights: number[], fitness?: number[]): Promise<string> {
+    const [pda] = await this.getIdentityPDA();
+    const ix = this.buildEvolveInstruction(pda, newWeights, fitness);
+
+    const tx = new Transaction().add(ix);
+    tx.feePayer = this.payer.publicKey;
+    tx.recentBlockhash = (await this.connection.getLatestBlockhash()).blockhash;
+
+    tx.sign(this.payer);
+
+    const sig = await this.connection.sendRawTransaction(tx.serialize());
+    await this.connection.confirmTransaction(sig, 'confirmed');
+
+    if (this.debug) {
+      console.log(`[AnchorStorage] Evolved weights: ${sig}`);
+    }
+
+    return sig;
   }
 
   /**
@@ -567,8 +668,9 @@ export class AnchorStorageBackend {
     offset += 4;
 
     // Declarations (MAX_STORED_DECLARATIONS * Declaration size)
+    // Layout: index(1) + value(8) + timestamp(8) + previousHash(32) + signature(64) + contentHash(32) = 145
     const declarations: OnChainDeclaration[] = [];
-    const DECL_SIZE = 1 + 8 + 8 + 32 + 64 + 256 + 2; // ~371 bytes
+    const DECL_SIZE = 1 + 8 + 8 + 32 + 64 + 32; // 145 bytes
     for (let i = 0; i < MAX_STORED_DECLARATIONS; i++) {
       if (i < declarationCount) {
         const decl = this.deserializeDeclaration(data.slice(offset, offset + DECL_SIZE));
@@ -593,27 +695,27 @@ export class AnchorStorageBackend {
     const pivotalCount = data.readUInt16LE(offset);
     offset += 2;
 
-    // Pivotal hashes (64 * 32 bytes)
+    // Pivotal hashes (MAX_STORED_DECLARATIONS * 32 bytes)
     const pivotalHashes: Uint8Array[] = [];
-    for (let i = 0; i < 64; i++) {
+    for (let i = 0; i < MAX_STORED_DECLARATIONS; i++) {
       if (i < pivotalCount) {
         pivotalHashes.push(new Uint8Array(data.slice(offset, offset + 32)));
       }
       offset += 32;
     }
 
-    // Pivotal impacts (64 * 8 bytes)
+    // Pivotal impacts (MAX_STORED_DECLARATIONS * 8 bytes)
     const pivotalImpacts: number[] = [];
-    for (let i = 0; i < 64; i++) {
+    for (let i = 0; i < MAX_STORED_DECLARATIONS; i++) {
       if (i < pivotalCount) {
         pivotalImpacts.push(Number(data.readBigUInt64LE(offset)) / WEIGHT_SCALE);
       }
       offset += 8;
     }
 
-    // Pivotal timestamps (64 * 8 bytes)
+    // Pivotal timestamps (MAX_STORED_DECLARATIONS * 8 bytes)
     const pivotalTimestamps: number[] = [];
-    for (let i = 0; i < 64; i++) {
+    for (let i = 0; i < MAX_STORED_DECLARATIONS; i++) {
       if (i < pivotalCount) {
         pivotalTimestamps.push(Number(data.readBigInt64LE(offset)));
       }
@@ -678,8 +780,9 @@ export class AnchorStorageBackend {
     const signature = new Uint8Array(data.slice(offset, offset + 64));
     offset += 64;
 
-    const contentLen = data.readUInt16LE(offset + 256);
-    const content = data.slice(offset, offset + contentLen).toString('utf8');
+    // content_hash: [u8; 32] (replaced inline content to fix stack overflow)
+    const contentHash = new Uint8Array(data.slice(offset, offset + 32));
+    offset += 32;
 
     return {
       index,
@@ -687,7 +790,7 @@ export class AnchorStorageBackend {
       timestamp,
       previousHash,
       signature,
-      content,
+      contentHash,
     };
   }
 
@@ -721,14 +824,14 @@ export class AnchorStorageBackend {
       time: identity.time,
     };
 
-    // Reconstruct declarations
+    // Reconstruct declarations (content_hash on-chain, content not stored on-chain)
     const declarations: Declaration[] = identity.declarations.map(d => ({
       index: d.index,
       value: d.value,
       timestamp: d.timestamp,
       previousHash: bytesToHex(d.previousHash),
       signature: `ed25519:${bytesToHex(d.signature)}`,
-      content: d.content,
+      content: `[on-chain hash: ${bytesToHex(d.contentHash)}]`,
     }));
 
     // Reconstruct pivotal experiences

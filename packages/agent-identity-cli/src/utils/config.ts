@@ -380,6 +380,10 @@ export interface SessionRecord {
     timestamp: string;
     durationMs?: number;
     success?: boolean;
+    /** Tool input arguments (from PostToolUse tool_input) */
+    args?: Record<string, unknown>;
+    /** Stringified tool response, truncated to 4KB */
+    result?: string;
   }>;
 
   /** Markers found in transcript */
@@ -387,6 +391,9 @@ export interface SessionRecord {
     learns: string[];
     pivotals: string[];
   };
+
+  /** Commit SHAs detected during session (from git commit output in Bash results) */
+  gitCommits?: string[];
 
   /** Whether this session has been processed */
   processed: boolean;

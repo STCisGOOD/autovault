@@ -33,6 +33,7 @@ import {
   type StoredInsight,
   type SessionRecord,
 } from '../utils/config';
+import { detectDimension } from '../utils/dimensions';
 
 // =============================================================================
 // TYPES
@@ -150,40 +151,6 @@ interface ConnectedIdentity {
 
   save(): Promise<boolean>;
   shutdown(): Promise<void>;
-}
-
-// =============================================================================
-// DIMENSION DETECTION
-// =============================================================================
-
-/**
- * Auto-detect dimension from insight text.
- * Uses keyword matching to identify the most relevant dimension.
- */
-function detectDimension(insight: string): string {
-  const lower = insight.toLowerCase();
-
-  // Curiosity patterns
-  if (/\b(explor|investigat|dig|search|read.*file|look.*into|discover|learn|understand|context)\b/.test(lower)) {
-    return 'curiosity';
-  }
-
-  // Precision patterns
-  if (/\b(test|verif|check|confirm|build|lint|type.*error|bug|fix|correct|accura|validat)\b/.test(lower)) {
-    return 'precision';
-  }
-
-  // Persistence patterns
-  if (/\b(retry|persist|alternat|try.*again|fail.*then|attempt|keep.*trying|workaround)\b/.test(lower)) {
-    return 'persistence';
-  }
-
-  // Empathy patterns
-  if (/\b(user|clarif|explain|prefer|adapt|question|understand.*need|communicat|style)\b/.test(lower)) {
-    return 'empathy';
-  }
-
-  return 'general';
 }
 
 // =============================================================================
@@ -498,10 +465,14 @@ export class AgentIdentity {
 
   /**
    * Get full CLAUDE.md section with markers.
+   * Now includes ARIL directives when available.
    */
   getCLAUDEmdSection(): string {
     const guidance = this.getSystemPromptGuidance();
     const coherence = this.getCoherenceNote();
+    const arilGuidance = this.getARILGuidanceMarkdown();
+
+    const arilSection = arilGuidance ? `\n${arilGuidance}\n` : '';
 
     return `<!-- PERSISTENCE-IDENTITY:START - Do not edit manually -->
 ## My Persistent Identity
@@ -511,10 +482,32 @@ export class AgentIdentity {
 **Evolution:** ${this.config.stats.sessionsRecorded} sessions | ${this.config.stats.insightsDeclared} insights
 
 ${guidance}
-
+${arilSection}
 ${coherence}
 
 <!-- PERSISTENCE-IDENTITY:END -->`;
+  }
+
+  /**
+   * Get ARIL-generated behavioral guidance as markdown.
+   * Returns null if ARIL has not been initialized or has no data.
+   */
+  getARILGuidanceMarkdown(): string | null {
+    if (!this.internalIdentity) return null;
+
+    // Check if the internal identity exposes ARIL guidance
+    const identity = this.internalIdentity as ConnectedIdentity & {
+      getARILGuidance?: () => { markdown: string; sessionCount: number } | null;
+    };
+
+    if (typeof identity.getARILGuidance === 'function') {
+      const guidance = identity.getARILGuidance();
+      if (guidance && guidance.sessionCount > 0 && guidance.markdown) {
+        return guidance.markdown;
+      }
+    }
+
+    return null;
   }
 
   // ===========================================================================

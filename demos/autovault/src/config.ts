@@ -74,6 +74,8 @@ export const RATE_LIMITS: Record<string, RateLimitConfig> = {
   '/api/yields': { windowMs: 60_000, maxRequests: 30 },
   '/api/recommendation': { windowMs: 60_000, maxRequests: 20 },
   '/api/memory/export': { windowMs: 60_000, maxRequests: 5 },
+  '/api/ping': { windowMs: 60_000, maxRequests: 6 },      // 2 pings/session × 3 sessions/min generous cap
+  '/api/network': { windowMs: 60_000, maxRequests: 10 },   // Dashboard refresh every 30s = 2/min
   'default': { windowMs: 60_000, maxRequests: 100 }
 };
 

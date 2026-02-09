@@ -25,9 +25,20 @@ npm-debug.log*
 coverage/
 .vercel
 
+# TypeScript build info
+*.tsbuildinfo
+
+# SQLite databases (trajectory.db, etc.)
+*.db
+*.db-wal
+*.db-shm
+
 # Anchor / Rust build artifacts
 **/target/
 **/*-keypair.json
+
+# npm auth tokens
+.npmrc
 
 # Windows artifacts
 nul

@@ -40,6 +40,9 @@ export interface CombinedVerificationResult {
     chainValid: boolean;
     notRevoked: boolean;
     signatureValid: boolean;
+    chainLength?: number;        // For trust scoring
+    genesisSlot?: number;        // For identity age
+    lastActivitySlot?: number;   // For recency
   };
   boundVerification?: {
     passed: boolean;
@@ -242,6 +245,16 @@ export class CombinedVerifier {
       if (chain.length === 0) {
         result.error = 'No identity chain found';
         return result;
+      }
+
+      // Populate chain info for trust scoring
+      result.cryptoVerification.chainLength = chain.length;
+      if (chain.length > 0) {
+        // Genesis slot from first record, last activity from last record
+        const firstRecord = chain[0] as any;
+        const lastRecord = chain[chain.length - 1] as any;
+        result.cryptoVerification.genesisSlot = firstRecord.slot || firstRecord.timestamp;
+        result.cryptoVerification.lastActivitySlot = lastRecord.slot || lastRecord.timestamp;
       }
 
       // Verify chain
