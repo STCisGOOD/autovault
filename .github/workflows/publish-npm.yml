@@ -8,8 +8,8 @@ on:
         required: true
         type: choice
         options:
-          - persistence-protocol
           - persistence-agent-identity
+          - persistence-agent-identity-cli
           - both
 
 jobs:
@@ -26,21 +26,22 @@ jobs:
           node-version: '20'
           registry-url: 'https://registry.npmjs.org'
 
-      - name: Publish persistence-protocol
-        if: ${{ inputs.package == 'persistence-protocol' || inputs.package == 'both' }}
-        run: |
-          cd packages/persistence-protocol
-          npm install
-          npm run build
-          npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Install workspace dependencies
+        run: npm install
 
       - name: Publish persistence-agent-identity
         if: ${{ inputs.package == 'persistence-agent-identity' || inputs.package == 'both' }}
         run: |
           cd packages/agent-identity
-          npm install
+          npm run build
+          npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish persistence-agent-identity-cli
+        if: ${{ inputs.package == 'persistence-agent-identity-cli' || inputs.package == 'both' }}
+        run: |
+          cd packages/agent-identity-cli
           npm run build
           npm publish --provenance --access public
         env:

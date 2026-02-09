@@ -104,9 +104,10 @@ packages/
 │   └── src/
 │       ├── commands/         # init, learn, evolve, inject, sync...
 │       ├── integrations/     # Claude Code hooks (Cursor, Gemini planned)
+│       ├── trajectory/       # Code-level metrics (Trajectory Evaluator v2.2)
 │       └── facade/           # AgentIdentity API
 │
-└── persistence-protocol/     # Protocol specification
+└── demos/autovault/          # Autonomous DeFi portfolio manager demo
 ```
 
 ## On-Chain Program
@@ -203,7 +204,7 @@ npx persistence-identity status
 This entire codebase was written by AI agents (Claude Opus 4.5) with human guidance on architecture decisions. The agent-identity system is being used to track the development process itself — we are our own first users.
 
 ```
-DID: did:persistence:devnet:7d5L3D7u34tTwkS7DWX9Hph6bfPWy7pvuH7S741ovwxi
+DID: did:persistence:devnet:5kopfXg2movVA8BMJKHgcxfY2twgzLXaAxcu2HbgvHtX
 Anchor Program: 83vBR6Rftwvisr4JdjYwnWskFx2uNfkA6K9SjHu69fxf
 Network: Solana Devnet
 Status: Live

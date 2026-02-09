@@ -1,6 +1,6 @@
 {
-  "name": "persistence-protocol",
-  "version": "1.0.0",
+  "name": "autovault",
+  "version": "0.3.0",
   "description": "Persistent, verifiable identity for AI agents on Solana",
   "private": true,
   "workspaces": [
