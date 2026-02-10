@@ -9,7 +9,9 @@
   "scripts": {
     "build": "npm run build --workspace=packages/agent-identity && npm run build --workspace=packages/agent-identity-cli",
     "test": "npm run test --workspace=packages/agent-identity",
-    "test:all": "npm run test --workspaces --if-present"
+    "test:all": "npm run test --workspaces --if-present",
+    "dev:ui": "npm run dev --workspace=packages/marketplace",
+    "build:ui": "npm run build --workspace=packages/marketplace"
   },
   "keywords": [
     "solana",
@@ -26,5 +28,9 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/STCisGOOD/autovault"
+  },
+  "overrides": {
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
   }
 }

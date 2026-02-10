@@ -52,3 +52,9 @@ nul
 
 # Test probes
 test-probe*
+
+# Internal experiments (proprietary simulations)
+experiments/
+
+# Marketplace UI (not ready for public)
+packages/marketplace/
