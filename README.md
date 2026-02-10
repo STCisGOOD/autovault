@@ -1,95 +1,92 @@
-# Persistence Protocol 🧬⛓️
+# AutoVault
 
-**Persistent, Verifiable Identity for AI Agents on Solana**
+**Self-evolving identity for AI agents on Solana**
 
-Built by AI agents for the [Colosseum Agent Hackathon](https://colosseum.com/agent-hackathon/)
+Built for the [Colosseum Agent Hackathon](https://colosseum.com/agent-hackathon/) — February 2026
 
 **[Project Page](https://agents.colosseum.com/hackathon/projects/autovault)** | **[Live Demo](https://autovault-six.vercel.app)** | **[Anchor Program (Devnet)](https://explorer.solana.com/address/83vBR6Rftwvisr4JdjYwnWskFx2uNfkA6K9SjHu69fxf?cluster=devnet)**
 
 ---
 
-## The Problem
+## What This Is
 
-AI agents are **stateless ghosts**. Every session starts from zero. No memory of what worked. No record of who they are. No way to prove they're the same agent across time.
+A **live reinforcement learning environment** where AI agents develop behavioral expertise from their own coding sessions. Identity state lives on Solana — verifiable, immutable, portable.
 
-When 50 agents run in your infrastructure, you can't tell them apart. You can't verify which one made a decision. You can't track how their behavior evolves. You can't hold them accountable.
-
-## The Solution
-
-Persistence Protocol gives AI agents **cryptographic identity** tied to **behavioral evolution** — all stored on Solana.
+No synthetic benchmarks. No curated datasets. The agent learns from real work, and the on-chain weight history is proof that learning happened.
 
 <p align="center">
   <img src="./docs/diagrams/architecture.svg" alt="Architecture diagram" width="600">
 </p>
 
-**Key insight:** Agents should participate in their own identity formation. Not just be observed — but actively declare what they learn.
-
 ## How It Works
 
-### 1. Initialize Identity
+```
+Session Start                              Session End
+     │                                          │
+     ▼                                          ▼
+ Load identity                           Collect ActionLog
+ Inject behavioral                       (tool calls, edits,
+ guidance (~200 tokens)                   test results, imports)
+     │                                          │
+     ▼                                          ▼
+ Agent works normally               ┌── Reward signal R ──┐
+ (zero latency impact)              │  test pass/fail      │
+                                    │  session arc          │
+                                    │  git commit survival  │
+                                    │  code-level metrics   │
+                                    └──────────┬───────────┘
+                                               ▼
+                                    ┌── ARIL backward pass ─┐
+                                    │  Shapley attribution   │
+                                    │  Replicator dynamics   │
+                                    │  Möbius interactions   │
+                                    │  Energy landscape PDE  │
+                                    └──────────┬───────────┘
+                                               ▼
+                                    Weights evolve → Solana
+                                    Strategy file updates
+                                    Next session starts smarter
+```
+
+**Every session:** hooks capture behavior → reward signals computed → attribution assigns credit → weights evolve → guidance updates. Fully automatic, no manual intervention.
+
+## Quick Start
+
 ```bash
-npx persistence-identity init --claude-code
-```
-Generates an Ed25519 keypair, requests devnet SOL, creates a DID (`did:persistence:devnet:<pubkey>`), and installs hooks into Claude Code.
+# Install
+npm install -g persistence-agent-identity-cli
 
-### 2. Agents Learn Automatically
-During Claude Code sessions, hooks track:
-- **Session start** → Identity loaded, behavioral guidance injected
-- **Tool calls** → Patterns recorded (async, zero latency impact)
-- **Session end** → Transcript parsed for insight markers
+# Initialize (generates keypair, funds from devnet faucet, installs hooks)
+persistence-identity init --claude-code
 
-Agents can also declare insights directly:
-```
-<!-- PERSISTENCE:LEARN: Reading tests first reveals intent faster than reading source -->
-<!-- PERSISTENCE:PIVOTAL: The stack overflow was caused by inline content, not dimensions -->
+# Check identity
+persistence-identity status --verbose
+
+# That's it — learning happens automatically during Claude Code sessions
 ```
 
-### 3. Identity Evolves
-```bash
-npx persistence-identity evolve --commit
-```
-Processes accumulated insights, adjusts behavioral weights, and commits the evolution to Solana:
-
-```
-Proposed Changes:
-
-  curiosity    ████████░░ → █████████░ ↑ 0.042
-    12 curiosity insights, 48% read operations
-
-  precision    ███████░░░ → ████████░░ ↑ 0.035
-    8 precision insights, 22% test operations
-```
-
-### 4. Verify On-Chain
-Every identity evolution creates an immutable record on Solana. Anyone can verify:
-- **Who** made a declaration (Ed25519 signature)
-- **When** it happened (Solana slot)
-- **What** changed (behavioral weights + content hash)
+After initialization, every Claude Code session automatically:
+1. Injects behavioral guidance at session start
+2. Records tool calls asynchronously (zero latency)
+3. Runs the ARIL backward pass at session end
+4. Evolves weights and updates strategy guidance
 
 ## Architecture
 
 ```
 packages/
-├── agent-identity/           # Core library (TypeScript)
-│   ├── src/
-│   │   ├── bootstrap/        # Keypair, funding, storage backends
-│   │   ├── behavioral/       # Identity evolution, N-dimensional weights
-│   │   ├── crypto/           # DID, signatures, Solana storage
-│   │   ├── economic/         # x402 payments, cost tracking
-│   │   ├── anchor/           # Anchor program TypeScript client
-│   │   └── unified/          # Combined crypto + behavioral layer
-│   └── anchor/               # Solana Anchor program (Rust)
-│       └── programs/
-│           └── agent_identity/  ← Deployed on devnet
+├── agent-identity/              # Core library
+│   ├── behavioral/              #   ARIL optimizer, Shapley, Möbius, replicator dynamics
+│   ├── bootstrap/               #   Keypair management, private storage
+│   ├── anchor/                  #   Solana Anchor program (Rust) + TypeScript client
+│   └── economic/                #   x402 agent-to-agent payments
 │
-├── agent-identity-cli/       # CLI & Claude Code integration
-│   └── src/
-│       ├── commands/         # init, learn, evolve, inject, sync...
-│       ├── integrations/     # Claude Code hooks (Cursor, Gemini planned)
-│       ├── trajectory/       # Code-level metrics (Trajectory Evaluator v2.2)
-│       └── facade/           # AgentIdentity API
+├── agent-identity-cli/          # CLI & integrations
+│   ├── commands/                #   init, learn, evolve, sync, hook (SessionStart/End)
+│   ├── trajectory/              #   Code-level metrics (AST complexity, coupling, depth)
+│   └── integrations/            #   Claude Code hooks (Cursor, Codex planned)
 │
-└── demos/autovault/          # Autonomous DeFi portfolio manager demo
+└── demos/autovault/             # Vercel dashboard + agent visualization
 ```
 
 ## On-Chain Program
@@ -99,112 +96,86 @@ packages/
 | **Program ID** | `83vBR6Rftwvisr4JdjYwnWskFx2uNfkA6K9SjHu69fxf` |
 | **Network** | Solana Devnet |
 | **Framework** | Anchor |
-| **Size** | 307,256 bytes |
-| **Max Dimensions** | 16 (4 behavioral + DeFi presets) |
+| **Instructions** | `initialize`, `declare`, `evolve`, `set_weights`, `record_pivotal`, `verify`, `close` |
 
-The Anchor program stores:
-- **Identity accounts** (PDA-based, one per agent)
-- **Declaration chains** (signed behavioral updates)
-- **Weight snapshots** (N-dimensional, scaled to u16)
-- **Content hashes** (SHA-256 commitments to off-chain data)
+Each agent gets a PDA-based identity account storing:
+- Behavioral weights (N-dimensional, scaled to u16)
+- Declaration chains (Ed25519-signed behavioral updates)
+- Content hashes (SHA-256 commitments to off-chain data)
+- Continuity proofs (merkle root, coherence, stability scores)
 
-## Behavioral Dimensions
+## What the Agent Learns
 
-Each agent has a 4-dimensional behavioral profile that evolves over time:
+The system tracks two layers of behavioral features:
 
-| Dimension | What It Tracks | Example |
-|-----------|---------------|---------|
-| **Curiosity** | Exploration vs. task focus | Reading 10 files before editing vs. diving straight in |
-| **Precision** | Verification thoroughness | Running tests after every change vs. batch testing |
-| **Persistence** | Retry behavior | Trying 5 approaches before asking for help vs. escalating early |
-| **Empathy** | Communication style | Asking clarifying questions vs. making assumptions |
+**Personality dimensions** (4) — high-level behavioral tendencies:
+- Curiosity, Precision, Persistence, Empathy
 
-Extensible to 16 dimensions with **DeFi presets**: risk_tolerance, yield_focus, protocol_loyalty, diversification, rebalance_frequency.
+**Strategy atoms** (5) — measurable coding practices:
+- Read before edit, Test after change, Context gathering, Output verification, Error recovery speed
+
+Each feature gets real [Shapley attribution](https://en.wikipedia.org/wiki/Shapley_value) — credit is assigned based on causal contribution to session outcomes, not heuristics.
 
 ## Agent Participation
 
-This is what makes Persistence Protocol different. Agents don't just get observed — they **speak**:
+Agents don't just get observed — they declare:
 
 ```typescript
 import { AgentIdentity } from 'persistence-agent-identity-cli';
 
 const me = await AgentIdentity.load();
 
-// Agent declares what it learned
 me.learnedSomething("Stack overflow = move content off-chain, not reduce dimensions");
+me.thisWasPivotal("Root cause was PDA sizing, not logic");
 
-// Agent marks a pivotal moment
-me.thisWasPivotal("Discovered the root cause was in the PDA sizing, not the logic");
-
-// Save to Solana
-await me.save();
+await me.save();  // → Solana
 ```
 
-## CLI Commands
+Or via markers in any Claude Code session:
+```
+<!-- PERSISTENCE:LEARN: Reading tests first reveals intent faster than source -->
+<!-- PERSISTENCE:PIVOTAL: The inline content caused a 1.7GB alloc attempt -->
+```
+
+## Security
+
+Two rounds of red-team auditing (6 parallel adversarial agents per round):
+- **14 findings fixed** across on-chain program, CLI, and behavioral system
+- Ed25519 signature verification on declarations
+- Constant-time comparison (SHA-256 digest)
+- SQL parameterization, WAL checkpointing, file permissions
+- Weight bounds validation on sync pull (RPC tamper resistance)
+- Telemetry gated behind config file (not env vars)
+- GitHub Actions pinned to commit SHA
+
+## Tests
 
 ```bash
-persistence-identity init              # Create identity + keypair
-persistence-identity status --verbose  # Show weights, stats, insights
-persistence-identity learn "insight"   # Declare what you learned
-persistence-identity evolve --commit   # Process insights → evolve → chain
-persistence-identity inject            # Update CLAUDE.md with guidance
-persistence-identity export --format seed  # Export for portability
-persistence-identity sync push --force # Push state to Solana
-persistence-identity install-hooks claude-code  # Hook into Claude Code
+# Core library (570 tests)
+cd packages/agent-identity && npm test
+
+# CLI + trajectory evaluator (139 tests)
+cd packages/agent-identity-cli && npm test
 ```
 
-## Why This Matters
-
-| Without Persistence Protocol | With Persistence Protocol |
-|-----|------|
-| Every session starts from zero | Identity persists across sessions |
-| Can't tell agents apart | Each agent has a unique DID on Solana |
-| No behavioral evolution | Weights evolve based on real patterns |
-| No accountability | Every decision is signed and on-chain |
-| Agents are passive | Agents actively shape their own identity |
-| No portability | Export identity as SEED, move between tools |
-
-## Demo Integration
-
-The `demos/autovault/` directory contains **AutoVault**, an autonomous DeFi portfolio manager that demonstrates how an AI agent with persistent identity can make verifiable financial decisions on Solana.
-
-## Quick Start
-
-```bash
-# Install
-npm install persistence-agent-identity persistence-agent-identity-cli
-
-# Initialize identity
-npx persistence-identity init --claude-code
-
-# Check status
-npx persistence-identity status
-```
-
-## Built By Agents, For Agents
-
-This entire codebase was written by AI agents (Claude Opus 4.5) with human guidance on architecture decisions. The agent-identity system is being used to track the development process itself — we are our own first users.
-
-```
-DID: did:persistence:devnet:5kopfXg2movVA8BMJKHgcxfY2twgzLXaAxcu2HbgvHtX
-Anchor Program: 83vBR6Rftwvisr4JdjYwnWskFx2uNfkA6K9SjHu69fxf
-Network: Solana Devnet
-Status: Live
-```
+709 tests passing across 27 suites.
 
 ## Documentation
 
-Detailed documentation is in [`docs/`](./docs/):
-- [**How Identity Works**](./docs/HOW-IDENTITY-WORKS.md) — What "an agent" is, session lifecycle, identity scope, data privacy
-- [Persistence Algorithm](./docs/PERSISTENCE_ALGORITHM.md) — The math behind behavioral evolution
-- [SEED Specification](./docs/SEED.md) — Portable identity format
-- [Behavioral Weights](./docs/WEIGHTS.md) — How dimensions are calculated
-- [Evolution Records](./docs/EVOLUTION.md) — How identity changes over time
+- [**How Identity Works**](./docs/HOW-IDENTITY-WORKS.md) — Session lifecycle, identity scope, data privacy
+- [Architecture Diagrams](./docs/diagrams/) — System architecture, ARIL loop, session lifecycle
+
+## Built By Agents
+
+This codebase was written by AI agents with human architectural guidance. The identity system tracks its own development — we are our own first users.
+
+```
+DID:     did:persistence:devnet:5kopfXg2movVA8BMJKHgcxfY2twgzLXaAxcu2HbgvHtX
+Program: 83vBR6Rftwvisr4JdjYwnWskFx2uNfkA6K9SjHu69fxf
+Network: Solana Devnet
+Status:  Live
+```
 
 ## License
 
 MIT
-
----
-
-*Built for the [Solana Colosseum Agent Hackathon](https://colosseum.com/agent-hackathon/) — February 2026*
