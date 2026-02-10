@@ -20,33 +20,9 @@ No synthetic benchmarks. No curated datasets. The agent learns from real work, a
 
 ## How It Works
 
-```
-Session Start                              Session End
-     │                                          │
-     ▼                                          ▼
- Load identity                           Collect ActionLog
- Inject behavioral                       (tool calls, edits,
- guidance (~200 tokens)                   test results, imports)
-     │                                          │
-     ▼                                          ▼
- Agent works normally               ┌── Reward signal R ──┐
- (zero latency impact)              │  test pass/fail      │
-                                    │  session arc          │
-                                    │  git commit survival  │
-                                    │  code-level metrics   │
-                                    └──────────┬───────────┘
-                                               ▼
-                                    ┌── ARIL backward pass ─┐
-                                    │  Shapley attribution   │
-                                    │  Replicator dynamics   │
-                                    │  Möbius interactions   │
-                                    │  Energy landscape PDE  │
-                                    └──────────┬───────────┘
-                                               ▼
-                                    Weights evolve → Solana
-                                    Strategy file updates
-                                    Next session starts smarter
-```
+<p align="center">
+  <img src="./docs/diagrams/session-lifecycle.svg" alt="Session lifecycle" width="600">
+</p>
 
 **Every session:** hooks capture behavior → reward signals computed → attribution assigns credit → weights evolve → guidance updates. Fully automatic, no manual intervention.
 
