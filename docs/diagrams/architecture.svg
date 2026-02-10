@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 420" font-family="'Courier New', monospace" font-size="12">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1a1a2e"/>
+      <stop offset="100%" stop-color="#0a0a0f"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="600" height="420" rx="8" fill="url(#bg)"/>
+
+  <!-- Title -->
+  <text x="300" y="30" fill="#00ff88" font-size="14" font-weight="bold" text-anchor="middle">PERSISTENCE PROTOCOL</text>
+
+  <!-- Top row: two boxes side by side -->
+  <!-- Cryptographic Layer -->
+  <rect x="20" y="50" width="270" height="100" rx="6" fill="#0f0f18" stroke="#00ff88" stroke-width="1" opacity="0.9"/>
+  <text x="155" y="72" fill="#00ff88" font-size="11" font-weight="bold" text-anchor="middle">CRYPTOGRAPHIC LAYER</text>
+  <text x="40" y="92" fill="#c0c0c0" font-size="10">Ed25519 keypairs</text>
+  <text x="40" y="108" fill="#c0c0c0" font-size="10">DID: did:persistence:devnet:...</text>
+  <text x="40" y="124" fill="#c0c0c0" font-size="10">Anchor PDA storage</text>
+  <text x="40" y="140" fill="#c0c0c0" font-size="10">Declaration chain signatures</text>
+
+  <!-- Behavioral Layer -->
+  <rect x="310" y="50" width="270" height="100" rx="6" fill="#0f0f18" stroke="#22d3ee" stroke-width="1" opacity="0.9"/>
+  <text x="445" y="72" fill="#22d3ee" font-size="11" font-weight="bold" text-anchor="middle">BEHAVIORAL LAYER</text>
+  <text x="330" y="92" fill="#c0c0c0" font-size="10">N-dimensional weights</text>
+  <text x="330" y="108" fill="#c0c0c0" font-size="10">Strategy atoms (5 features)</text>
+  <text x="330" y="124" fill="#c0c0c0" font-size="10">ARIL backward pass</text>
+  <text x="330" y="140" fill="#c0c0c0" font-size="10">Shapley attribution</text>
+
+  <!-- On-Chain box -->
+  <rect x="20" y="170" width="560" height="110" rx="6" fill="#0f0f18" stroke="#a78bfa" stroke-width="1" opacity="0.9"/>
+  <text x="300" y="192" fill="#a78bfa" font-size="11" font-weight="bold" text-anchor="middle">ON-CHAIN (Solana Devnet — Anchor Program)</text>
+  <text x="40" y="214" fill="#c0c0c0" font-size="10">PDA-based identity accounts (one per agent)</text>
+  <text x="40" y="232" fill="#c0c0c0" font-size="10">Declaration chains with Ed25519 signatures</text>
+  <text x="40" y="250" fill="#c0c0c0" font-size="10">Behavioral weight snapshots (scaled u64)</text>
+  <text x="40" y="268" fill="#c0c0c0" font-size="10">Content hashes only — no raw content on-chain</text>
+
+  <!-- Off-Chain box -->
+  <rect x="20" y="300" width="560" height="100" rx="6" fill="#0f0f18" stroke="#fbbf24" stroke-width="1" opacity="0.9"/>
+  <text x="300" y="322" fill="#fbbf24" font-size="11" font-weight="bold" text-anchor="middle">OFF-CHAIN (Private, Local — ~/.agent-identity/)</text>
+  <text x="40" y="344" fill="#c0c0c0" font-size="10">Encrypted keypair, ARIL state, session logs</text>
+  <text x="40" y="362" fill="#c0c0c0" font-size="10">Trajectory metrics (SQLite), code complexity data</text>
+  <text x="40" y="380" fill="#c0c0c0" font-size="10">Git survival tracking, strategy output</text>
+  <text x="40" y="398" fill="#c0c0c0" font-size="10">Hash commitments stored on-chain for verifiability</text>
+</svg>

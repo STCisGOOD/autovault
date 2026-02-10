@@ -232,22 +232,21 @@ export function sha256(input: string): string {
 
 /**
  * Constant-time string comparison to prevent timing attacks.
+ *
+ * Hashes both inputs to fixed-length SHA-256 digests before comparing.
+ * This eliminates length-based timing leaks: timingSafeEqual always
+ * compares 32-byte buffers regardless of input lengths.
+ * SHA-256 collision probability is negligible (2^-128).
  */
 export function secureCompare(a: string, b: string): boolean {
   if (typeof a !== 'string' || typeof b !== 'string') {
     return false;
   }
 
-  const bufA = Buffer.from(a);
-  const bufB = Buffer.from(b);
+  const hashA = crypto.createHash('sha256').update(a).digest();
+  const hashB = crypto.createHash('sha256').update(b).digest();
 
-  if (bufA.length !== bufB.length) {
-    // Still do comparison to maintain constant time
-    crypto.timingSafeEqual(bufA, bufA);
-    return false;
-  }
-
-  return crypto.timingSafeEqual(bufA, bufB);
+  return crypto.timingSafeEqual(hashA, hashB);
 }
 
 // =============================================================================

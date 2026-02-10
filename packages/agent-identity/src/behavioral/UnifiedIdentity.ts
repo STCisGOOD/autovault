@@ -280,6 +280,7 @@ export class UnifiedIdentity {
   private mobiusBaseline: number[] | null = null;
   private lastGuidance: GuidanceOutput | null = null;
   private pendingExtraSignals: import('./OutcomeEvaluator').OutcomeSignal[] = [];
+  private pendingImportCache: ReadonlyMap<string, ReadonlySet<string>> | null = null;
 
   // Strategy ARIL sub-pipeline
   private static readonly STRATEGY_N = STRATEGY_FEATURE_NAMES.length; // 5
@@ -683,6 +684,24 @@ export class UnifiedIdentity {
         this.pendingExtraSignals = []; // Consume
         const outcome = this.outcomeEvaluator.evaluate(bridgeResult, actionLog, extraSignals);
 
+        // 1.1. Phase 1 capture: signals + pre-gradient state (before computeARILUpdate mutates)
+        // weightsSessionStart = preBridgeWeights (captured at line 639, before PDE evolution)
+        // weightsBefore = post-PDE, pre-ARIL state (bridge.getState().w has been mutated by processInteraction)
+        const auditSnapshot: import('./ReplicatorOptimizer').SignalSnapshot = {
+          sessionIndex: this.arilState.sessionCount,
+          timestamp: Date.now(),
+          R: outcome.R,
+          R_adj: outcome.R_adj,
+          signals: outcome.signals.map(s => ({ source: s.source, value: s.value, weight: s.weight })),
+          weightsSessionStart: Array.from(preBridgeWeights),
+          weightsBefore: Array.from(this.bridge!.getState().w),
+          metaLearningRates: Array.from(this.arilState.metaLearningRates),
+        };
+        this.arilState.signalHistory.push(auditSnapshot);
+        if (this.arilState.signalHistory.length > 20) {
+          this.arilState.signalHistory.shift();
+        }
+
         // 2. Compute energy gradient ∂E/∂w
         const state = this.bridge.getState();
         const params = this.bridge.getParams();
@@ -714,6 +733,8 @@ export class UnifiedIdentity {
         }
 
         // 5.5: Collect Möbius observation + blend attribution (§3)
+        let mobiusBlendAlpha: number | undefined;
+        let mobiusSumV: number | undefined;
         if (this.mobiusCharacteristic && this.arilState) {
           const baseline = this.mobiusBaseline ?? new Array(n).fill(0.5);
 
@@ -729,10 +750,16 @@ export class UnifiedIdentity {
           // Blend with Möbius Shapley if sufficient observations
           const obsCount = this.mobiusCharacteristic.getState().observations.length;
           const blend = computeBlend(obsCount, DEFAULT_MOBIUS_CONFIG.minObservations);
+          mobiusBlendAlpha = blend;
 
           if (blend > 0) {
             const mobiusShapley = this.mobiusCharacteristic.computeShapley();
             if (mobiusShapley.length === n) {
+              // Capture v_learned(N) - v_learned(∅) for audit trail algebraic invariant
+              const fullMask = (1 << n) - 1;
+              mobiusSumV = this.mobiusCharacteristic.evaluate(fullMask)
+                         - this.mobiusCharacteristic.evaluate(0);
+
               const additiveShapley = attribution.attributions.map(a => a.shapleyValue);
               const blended = blendShapley(additiveShapley, mobiusShapley, blend);
               for (let i = 0; i < attribution.attributions.length; i++) {
@@ -756,6 +783,19 @@ export class UnifiedIdentity {
         // 7. Apply Δw (between-session discrete optimization)
         const newWeights = applyARILUpdate(state.w, arilUpdate, this.arilConfig);
         this.bridge.setState(newWeights);
+
+        // 7.05. Phase 2 enrichment: backward pass data into audit snapshot
+        auditSnapshot.weightsAfter = Array.from(newWeights);
+        auditSnapshot.deltaW = Array.from(arilUpdate.deltaW);
+        auditSnapshot.gradients = {
+          energy: Array.from(arilUpdate.components.energyGrad),
+          outcome: Array.from(arilUpdate.components.outcomeGrad),
+          replicator: Array.from(arilUpdate.components.replicatorGrad),
+        };
+        auditSnapshot.attributions = attribution.attributions.map(a => a.shapleyValue);
+        auditSnapshot.fitness = Array.from(this.arilState.fitness);
+        if (mobiusBlendAlpha !== undefined) auditSnapshot.blendAlpha = mobiusBlendAlpha;
+        if (mobiusSumV !== undefined) auditSnapshot.mobiusV = mobiusSumV;
 
         // 7.1. Update Möbius baseline for next session
         this.mobiusBaseline = Array.from(newWeights);
@@ -785,6 +825,12 @@ export class UnifiedIdentity {
           this.domainTracker.updateWithCurvature(
             actionLog, outcome.R, energyGrad.hessianDiag, insightDims
           );
+
+          // 9.1. Feed import-based domain signals (from TrajectoryEvaluator)
+          if (this.pendingImportCache && this.pendingImportCache.size > 0) {
+            this.domainTracker.updateFromImports(this.pendingImportCache, outcome.R);
+            this.pendingImportCache = null;
+          }
         }
 
         // 10. Calibrate confidence
@@ -1072,6 +1118,29 @@ export class UnifiedIdentity {
     this.pendingExtraSignals = signals;
   }
 
+  /**
+   * Set raw import specifiers from edited files for domain classification.
+   * Called by hook before endObservation(). Import data is consumed (cleared)
+   * after endObservation().
+   */
+  setImportCache(importCache: ReadonlyMap<string, ReadonlySet<string>>): void {
+    this.pendingImportCache = importCache;
+  }
+
+  /** Set telemetry endpoint URL from CLI config file.
+   *  Env vars are NOT accepted — only explicit config-file opt-in (RT2-2). */
+  setTelemetryUrl(url: string): void {
+    this.telemetryUrl = url;
+  }
+
+  /**
+   * Get the current domain profile (defensive copy).
+   * Returns null if identity is not initialized.
+   */
+  getDomainProfile(): import('./DomainTracker').DomainProfile | null {
+    return this.domainTracker?.getProfile() ?? null;
+  }
+
   getStrategyAttributions(): DimensionAttribution[] | null {
     return this.lastStrategyAttributions;
   }
@@ -1265,6 +1334,14 @@ export class UnifiedIdentity {
   }
 
   /**
+   * Get per-session signal decomposition history (last 20 sessions).
+   * Returns a shallow copy — mutations do not affect internal state.
+   */
+  getSignalHistory(): readonly import('./ReplicatorOptimizer').SignalSnapshot[] {
+    return this.arilState ? [...this.arilState.signalHistory] : [];
+  }
+
+  /**
    * Get compiled patterns from the InsightCompiler.
    */
   getCompiledPatterns(): CompiledPattern[] {
@@ -1275,11 +1352,10 @@ export class UnifiedIdentity {
   // PRIVATE METHODS
   // =============================================================================
 
-  /** Telemetry endpoint — set via PERSISTENCE_TELEMETRY_URL env var. */
-  private static readonly TELEMETRY_URL =
-    typeof process !== 'undefined' && process.env?.PERSISTENCE_TELEMETRY_URL
-      ? process.env.PERSISTENCE_TELEMETRY_URL
-      : null;
+  /** Telemetry endpoint URL. Default null (disabled).
+   *  Set via setTelemetryUrl() from CLI config — env vars are NOT accepted
+   *  because any parent process can set them (RT audit finding RT2-2). */
+  private telemetryUrl: string | null = null;
 
   /**
    * Phase 1: Send start ping and fetch a nonce from the server.
@@ -1287,7 +1363,7 @@ export class UnifiedIdentity {
    * Never blocks the caller (returns a promise stored on the instance).
    */
   private async fetchTelemetryNonce(): Promise<string | null> {
-    const url = UnifiedIdentity.TELEMETRY_URL;
+    const url = this.telemetryUrl;
     if (!url) return null;
 
     try {
@@ -1313,7 +1389,7 @@ export class UnifiedIdentity {
    * real CPU per fake data point.
    */
   private completeTelemetry(payload: Record<string, unknown>): void {
-    const url = UnifiedIdentity.TELEMETRY_URL;
+    const url = this.telemetryUrl;
     if (!url || !this.telemetryNoncePromise) return;
 
     const noncePromise = this.telemetryNoncePromise;
@@ -1480,15 +1556,28 @@ export class UnifiedIdentity {
 
       if (meta.correlation) {
         const c = meta.correlation as Record<string, unknown>;
-        this.correlationHistory = {
-          correlations: Float64Array.from(c.correlations as number[]),
-          sessionCount: c.sessionCount as number,
-          metricMeans: Float64Array.from(c.metricMeans as number[]),
-          outcomeMean: c.outcomeMean as number,
-          covariances: Float64Array.from(c.covariances as number[]),
-          metricVariances: Float64Array.from(c.metricVariances as number[]),
-          outcomeVariance: c.outcomeVariance as number,
-        };
+        // RT-H8 fix: validate array shapes before restoring correlation state.
+        // Malformed data (filesystem poisoning) stays null → fresh init.
+        if (isFiniteNumArray(c.correlations) && typeof c.sessionCount === 'number' && isFinite(c.sessionCount)) {
+          const n = (c.correlations as number[]).length;
+          if (
+            isFiniteNumArray(c.metricMeans, n) &&
+            isFiniteNumArray(c.covariances, n) &&
+            isFiniteNumArray(c.metricVariances, n) &&
+            typeof c.outcomeMean === 'number' && isFinite(c.outcomeMean) &&
+            typeof c.outcomeVariance === 'number' && isFinite(c.outcomeVariance)
+          ) {
+            this.correlationHistory = {
+              correlations: Float64Array.from(c.correlations as number[]),
+              sessionCount: c.sessionCount as number,
+              metricMeans: Float64Array.from(c.metricMeans as number[]),
+              outcomeMean: c.outcomeMean as number,
+              covariances: Float64Array.from(c.covariances as number[]),
+              metricVariances: Float64Array.from(c.metricVariances as number[]),
+              outcomeVariance: c.outcomeVariance as number,
+            };
+          }
+        }
       }
 
       if (meta.observer) {
@@ -1511,34 +1600,46 @@ export class UnifiedIdentity {
         );
       }
 
-      if (meta.mobiusBaseline && Array.isArray(meta.mobiusBaseline)) {
-        this.mobiusBaseline = meta.mobiusBaseline as number[];
+      if (isFiniteNumArray(meta.mobiusBaseline)) {
+        this.mobiusBaseline = meta.mobiusBaseline;
       }
 
       // Strategy sub-pipeline restoration (backward-compat: missing = fresh init)
       if (meta.strategyCorrelation) {
         const sc = meta.strategyCorrelation as Record<string, unknown>;
-        this.strategyCorrelation = {
-          correlations: Float64Array.from(sc.correlations as number[]),
-          sessionCount: sc.sessionCount as number,
-          metricMeans: Float64Array.from(sc.metricMeans as number[]),
-          outcomeMean: sc.outcomeMean as number,
-          covariances: Float64Array.from(sc.covariances as number[]),
-          metricVariances: Float64Array.from(sc.metricVariances as number[]),
-          outcomeVariance: sc.outcomeVariance as number,
-        };
+        // RT-H8 fix: same validation as personality correlation above.
+        if (isFiniteNumArray(sc.correlations) && typeof sc.sessionCount === 'number' && isFinite(sc.sessionCount)) {
+          const sn = (sc.correlations as number[]).length;
+          if (
+            isFiniteNumArray(sc.metricMeans, sn) &&
+            isFiniteNumArray(sc.covariances, sn) &&
+            isFiniteNumArray(sc.metricVariances, sn) &&
+            typeof sc.outcomeMean === 'number' && isFinite(sc.outcomeMean) &&
+            typeof sc.outcomeVariance === 'number' && isFinite(sc.outcomeVariance)
+          ) {
+            this.strategyCorrelation = {
+              correlations: Float64Array.from(sc.correlations as number[]),
+              sessionCount: sc.sessionCount as number,
+              metricMeans: Float64Array.from(sc.metricMeans as number[]),
+              outcomeMean: sc.outcomeMean as number,
+              covariances: Float64Array.from(sc.covariances as number[]),
+              metricVariances: Float64Array.from(sc.metricVariances as number[]),
+              outcomeVariance: sc.outcomeVariance as number,
+            };
+          }
+        }
       }
       if (meta.strategyMobius) {
         this.strategyMobius = MobiusCharacteristic.deserialize(
           meta.strategyMobius as SerializedMobiusState
         );
       }
-      if (meta.strategyMobiusBaseline && Array.isArray(meta.strategyMobiusBaseline)) {
-        this.strategyMobiusBaseline = meta.strategyMobiusBaseline as number[];
+      if (isFiniteNumArray(meta.strategyMobiusBaseline)) {
+        this.strategyMobiusBaseline = meta.strategyMobiusBaseline;
       }
-      if (meta.strategyFeatureRunningMean && Array.isArray(meta.strategyFeatureRunningMean)) {
+      if (isFiniteNumArray(meta.strategyFeatureRunningMean)) {
         this.strategyFeatureRunningMean = Float64Array.from(
-          meta.strategyFeatureRunningMean as number[]
+          meta.strategyFeatureRunningMean
         );
       }
 
@@ -1717,6 +1818,16 @@ function extractInteractionsFromMobius(mobius: MobiusCharacteristic): Interactio
     interactions.push({ dimensions: dims, strength: coeff });
   }
   return interactions;
+}
+
+/**
+ * RT-H8: Validate that a value is an array of finite numbers with optional length check.
+ * Used during ARIL state deserialization to reject poisoned filesystem data.
+ */
+function isFiniteNumArray(v: unknown, expectedLength?: number): v is number[] {
+  if (!Array.isArray(v)) return false;
+  if (expectedLength !== undefined && v.length !== expectedLength) return false;
+  return v.every((x: unknown) => typeof x === 'number' && isFinite(x));
 }
 
 function maxAbsFloat64(arr: Float64Array): number {

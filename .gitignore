@@ -37,8 +37,18 @@ coverage/
 **/target/
 **/*-keypair.json
 
+# Smoke tests (may reference local keypair paths)
+smoke-test.js
+smoke-test*.js
+
 # npm auth tokens
 .npmrc
 
 # Windows artifacts
 nul
+
+# ARIL state (machine-generated per-project)
+.aril/
+
+# Test probes
+test-probe*

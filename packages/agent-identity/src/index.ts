@@ -96,6 +96,8 @@ export {
   // Solana storage backend (blockchain persistence)
   SolanaStorageBackend,
   createSolanaStorageBackend,
+  // Private storage (off-chain ActionLogs, ARIL state)
+  createFileSystemPrivateStorage,
   // Types
   type BootstrapConfig,
   type BootstrappedIdentity,
@@ -104,6 +106,7 @@ export {
   type DevnetFunderConfig,
   type FundingResult,
   type SolanaStorageBackendConfig,
+  type PrivateStorageConfig,
 } from './bootstrap';
 
 // =============================================================================

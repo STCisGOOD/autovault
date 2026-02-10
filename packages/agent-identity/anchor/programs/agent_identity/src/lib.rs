@@ -52,6 +52,14 @@ pub struct PivotalExperienceRecorded {
     pub timestamp: i64,
 }
 
+/// Emitted when weights are set directly
+#[event]
+pub struct WeightsSet {
+    pub authority: Pubkey,
+    pub weights: Vec<u64>,
+    pub timestamp: i64,
+}
+
 /// Emitted when identity is closed
 #[event]
 pub struct IdentityClosed {
@@ -337,6 +345,63 @@ pub mod agent_identity {
             authority: identity.authority,
             time: identity.time,
             coherence_score: identity.coherence_score,
+            timestamp: clock.unix_timestamp,
+        });
+
+        Ok(())
+    }
+
+    /// Set weights directly (absolute overwrite).
+    ///
+    /// Unlike `evolve` (a PDE integrator for gradual drift), this instruction
+    /// takes absolute weight values and overwrites the on-chain weights directly.
+    /// Self-model is also updated to match (coherent set: m = w).
+    ///
+    /// **EMA reset warning**: Setting m = w erases the self-model's exponential
+    /// moving average history. The coherence score drops to 0 (perfect coherence)
+    /// because the distance ||w - m|| = 0. Any long-term weight trend tracked
+    /// by the self-model is lost. Use this for initialization or recovery, not
+    /// for routine per-session sync. For routine sync, use `evolve` which
+    /// preserves the EMA relationship (dm/dt = -mu * (m - w)).
+    pub fn set_weights(
+        ctx: Context<SetWeights>,
+        new_weights: Vec<u64>,
+    ) -> Result<()> {
+        let identity = &mut ctx.accounts.identity;
+        let clock = Clock::get()?;
+
+        require!(
+            new_weights.len() == identity.dimension_count as usize,
+            AgentIdentityError::DimensionWeightMismatch
+        );
+
+        for (i, &weight) in new_weights.iter().enumerate() {
+            require!(
+                weight <= 10000,
+                AgentIdentityError::WeightOutOfRange
+            );
+            identity.weights[i] = weight;
+            identity.self_model[i] = weight; // Coherent: m = w
+        }
+
+        // Recompute coherence (should be 0 since m = w)
+        identity.coherence_score = compute_coherence(
+            &identity.weights,
+            &identity.self_model,
+            identity.dimension_count,
+        );
+
+        identity.updated_at = clock.unix_timestamp;
+
+        msg!(
+            "Weights set directly: {} dimensions, coherence={}",
+            identity.dimension_count,
+            identity.coherence_score
+        );
+
+        emit!(WeightsSet {
+            authority: identity.authority,
+            weights: new_weights,
             timestamp: clock.unix_timestamp,
         });
 
@@ -700,6 +765,19 @@ pub struct Evolve<'info> {
 }
 
 #[derive(Accounts)]
+pub struct SetWeights<'info> {
+    #[account(
+        mut,
+        seeds = [b"agent-identity", authority.key().as_ref()],
+        bump = identity.bump,
+        has_one = authority
+    )]
+    pub identity: Account<'info, AgentIdentity>,
+
+    pub authority: Signer<'info>,
+}
+
+#[derive(Accounts)]
 pub struct RecordPivotal<'info> {
     #[account(
         mut,
@@ -777,6 +855,7 @@ impl Declaration {
         8 +     // value
         8 +     // timestamp
         32 +    // previous_hash
+        64 +    // signature (RT-C1 fix: was missing, under-allocated by 256 bytes)
         32;     // content_hash
 }
 
@@ -954,10 +1033,10 @@ fn verify_ed25519_signature(
             continue;
         }
 
-        // Ed25519 instruction data format:
+        // Ed25519 instruction data format (from solana-sdk SIGNATURE_OFFSETS_START=2):
         // - 1 byte: number of signatures (must be 1 for our case)
-        // - 2 bytes: padding
-        // - Ed25519SignatureOffsets struct (14 bytes)
+        // - 1 byte: padding (u16 alignment)
+        // - Ed25519SignatureOffsets struct (14 bytes, starting at byte 2)
         //   - signature_offset: u16
         //   - signature_instruction_index: u16
         //   - public_key_offset: u16
@@ -976,11 +1055,22 @@ fn verify_ed25519_signature(
             continue;
         }
 
-        // Parse offsets (little-endian u16)
-        let sig_offset = u16::from_le_bytes([ix.data[3], ix.data[4]]) as usize;
-        let pk_offset = u16::from_le_bytes([ix.data[7], ix.data[8]]) as usize;
-        let msg_offset = u16::from_le_bytes([ix.data[11], ix.data[12]]) as usize;
-        let msg_size = u16::from_le_bytes([ix.data[13], ix.data[14]]) as usize;
+        // Parse offsets (little-endian u16, starting at byte 2 per Solana SDK)
+        let sig_offset = u16::from_le_bytes([ix.data[2], ix.data[3]]) as usize;
+        let sig_ix_idx = u16::from_le_bytes([ix.data[4], ix.data[5]]);
+        let pk_offset = u16::from_le_bytes([ix.data[6], ix.data[7]]) as usize;
+        let pk_ix_idx = u16::from_le_bytes([ix.data[8], ix.data[9]]);
+        let msg_offset = u16::from_le_bytes([ix.data[10], ix.data[11]]) as usize;
+        let msg_size = u16::from_le_bytes([ix.data[12], ix.data[13]]) as usize;
+        let msg_ix_idx = u16::from_le_bytes([ix.data[14], ix.data[15]]);
+
+        // RT-H4 fix: All instruction_index fields must be 0xFFFF (inline data).
+        // Without this check, an attacker could reference data from a different
+        // instruction, making the precompile verify a different message than
+        // what this function reads from the inline data.
+        if sig_ix_idx != u16::MAX || pk_ix_idx != u16::MAX || msg_ix_idx != u16::MAX {
+            continue;
+        }
 
         // Verify the instruction contains our expected data
         if ix.data.len() < sig_offset + 64 {

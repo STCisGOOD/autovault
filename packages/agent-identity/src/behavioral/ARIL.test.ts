@@ -20,8 +20,11 @@ import {
 import {
   OutcomeEvaluator,
   extractSessionArcSignal,
+  extractTestSignal,
   isVerifyCommand,
+  DEFAULT_OUTCOME_CONFIG,
   type SessionOutcome,
+  type OutcomeSignal,
 } from './OutcomeEvaluator';
 
 import {
@@ -39,7 +42,9 @@ import {
   serializeARILState,
   deserializeARILState,
   DEFAULT_ARIL_CONFIG,
+  MIN_NEUROPLASTICITY_SESSIONS,
   type ARILState,
+  type SignalSnapshot,
 } from './ReplicatorOptimizer';
 
 import {
@@ -873,6 +878,119 @@ describe('ReplicatorOptimizer', () => {
     expect(deserialized.recentAttributions).toEqual(state.recentAttributions);
   });
 
+  test('signalHistory round-trips through serialization', () => {
+    const state = createARILState(4);
+    state.signalHistory = [
+      {
+        sessionIndex: 0,
+        timestamp: 1700000000000,
+        R: 0.45,
+        R_adj: 0.12,
+        signals: [
+          { source: 'energy', value: 0.3, weight: 0.15 },
+          { source: 'test_result', value: 0.8, weight: 0.30 },
+        ],
+      },
+      {
+        sessionIndex: 1,
+        timestamp: 1700001000000,
+        R: -0.2,
+        R_adj: -0.65,
+        signals: [
+          { source: 'tool_success', value: 0.5, weight: 0.15 },
+        ],
+      },
+    ];
+
+    const serialized = serializeARILState(state);
+    expect(serialized.signalHistory).toHaveLength(2);
+
+    const deserialized = deserializeARILState(serialized);
+    expect(deserialized.signalHistory).toHaveLength(2);
+    expect(deserialized.signalHistory[0].sessionIndex).toBe(0);
+    expect(deserialized.signalHistory[0].R).toBe(0.45);
+    expect(deserialized.signalHistory[0].R_adj).toBe(0.12);
+    expect(deserialized.signalHistory[0].signals).toEqual([
+      { source: 'energy', value: 0.3, weight: 0.15 },
+      { source: 'test_result', value: 0.8, weight: 0.30 },
+    ]);
+    expect(deserialized.signalHistory[1].R).toBe(-0.2);
+  });
+
+  test('signalHistory caps at 20 entries on deserialization', () => {
+    const state = createARILState(4);
+    for (let i = 0; i < 25; i++) {
+      state.signalHistory.push({
+        sessionIndex: i,
+        timestamp: 1700000000000 + i * 1000,
+        R: i * 0.01,
+        R_adj: i * 0.005,
+        signals: [{ source: 'energy', value: 0.1, weight: 0.15 }],
+      });
+    }
+    expect(state.signalHistory).toHaveLength(25);
+
+    const serialized = serializeARILState(state);
+    const deserialized = deserializeARILState(serialized);
+
+    expect(deserialized.signalHistory).toHaveLength(20);
+    // Should keep the LAST 20 (indices 5-24)
+    expect(deserialized.signalHistory[0].sessionIndex).toBe(5);
+    expect(deserialized.signalHistory[19].sessionIndex).toBe(24);
+  });
+
+  test('signalHistory backward compat: missing field deserializes to empty array', () => {
+    // Simulate data from before signalHistory was added
+    const legacyData = {
+      fitness: [0.3, 0.5, 0.7, 0.4],
+      metaLearningRates: [1.0, 1.0, 1.0, 1.0],
+      recentAttributions: [],
+      sessionCount: 5,
+      // no signalHistory field
+    };
+
+    const deserialized = deserializeARILState(legacyData as any);
+    expect(deserialized.signalHistory).toEqual([]);
+    // Other fields still work
+    expect(deserialized.sessionCount).toBe(5);
+    expect(Array.from(deserialized.fitness)).toEqual([0.3, 0.5, 0.7, 0.4]);
+  });
+
+  test('signalHistory rejects malformed snapshots (RT-H8)', () => {
+    const validSnap = {
+      sessionIndex: 0,
+      timestamp: 1700000000000,
+      R: 0.5,
+      R_adj: 0.1,
+      signals: [{ source: 'energy', value: 0.3, weight: 0.15 }],
+    };
+
+    const malformedEntries = [
+      { ...validSnap, R: NaN },                    // NaN R
+      { ...validSnap, R_adj: Infinity },            // Infinite R_adj
+      { ...validSnap, sessionIndex: NaN },          // NaN sessionIndex
+      { ...validSnap, timestamp: -Infinity },       // -Infinity timestamp
+      { ...validSnap, signals: 'not-array' },       // signals not array
+      null,                                         // null entry
+      undefined,                                    // undefined entry
+      { sessionIndex: 0, R: 0.5 },                  // missing fields
+    ];
+
+    const data = {
+      fitness: [0.5, 0.5, 0.5, 0.5],
+      metaLearningRates: [1.0, 1.0, 1.0, 1.0],
+      recentAttributions: [],
+      sessionCount: 1,
+      signalHistory: [validSnap, ...malformedEntries, validSnap],
+    };
+
+    const deserialized = deserializeARILState(data as any);
+    // Only the 2 valid snapshots survive
+    expect(deserialized.signalHistory).toHaveLength(2);
+    expect(deserialized.signalHistory[0].R).toBe(0.5);
+    expect(deserialized.signalHistory[1].R).toBe(0.5);
+  });
+
   test('neuroplasticity: high-variance dimension gets higher meta-rate', () => {
     const n = 4;
     let state = createARILState(n);
@@ -1294,6 +1412,134 @@ describe('DomainTracker', () => {
     const deserialized = deserializeDomainProfile(serialized);
 
     expect(deserialized.domains.size).toBe(profile.domains.size);
+  });
+
+  // ===========================================================================
+  // IMPORT-BASED CLASSIFICATION
+  // ===========================================================================
+
+  test('classifyImports: @solana/ scoped packages → solana', () => {
+    const imports = new Set(['@solana/web3.js', '@solana/spl-token', 'lodash']);
+    const hits = DomainTracker.classifyImports(imports);
+    expect(hits.get('solana')).toBe(2);
+    expect(hits.has('defi')).toBe(false); // lodash doesn't match
+  });
+
+  test('classifyImports: react ecosystem → react', () => {
+    const imports = new Set(['react', 'react-dom', 'next/router']);
+    const hits = DomainTracker.classifyImports(imports);
+    expect(hits.get('react')).toBe(3);
+  });
+
+  test('classifyImports: DeFi ecosystem → defi', () => {
+    const imports = new Set(['ethers', 'hardhat', 'viem']);
+    const hits = DomainTracker.classifyImports(imports);
+    expect(hits.get('defi')).toBe(3);
+  });
+
+  test('classifyImports: first prefix match wins (@solana/web3.js → solana, not defi)', () => {
+    // @solana/web3.js should match @solana/ (solana), NOT web3 (defi)
+    const imports = new Set(['@solana/web3.js']);
+    const hits = DomainTracker.classifyImports(imports);
+    expect(hits.get('solana')).toBe(1);
+    expect(hits.has('defi')).toBe(false);
+  });
+
+  test('classifyImports: unrecognized imports → empty map', () => {
+    const imports = new Set(['lodash', 'express', 'moment']);
+    const hits = DomainTracker.classifyImports(imports);
+    expect(hits.size).toBe(0);
+  });
+
+  test('classifyImports: empty set → empty map', () => {
+    const hits = DomainTracker.classifyImports(new Set());
+    expect(hits.size).toBe(0);
+  });
+
+  // ===========================================================================
+  // updateFromImports
+  // ===========================================================================
+
+  test('updateFromImports: creates domain exposure from imports', () => {
+    const tracker = new DomainTracker();
+    const importCache = new Map<string, Set<string>>([
+      ['src/app.ts', new Set(['@solana/web3.js', '@solana/spl-token'])],
+      ['src/utils.ts', new Set(['@solana/web3.js'])],
+    ]);
+
+    tracker.updateFromImports(importCache, 0.5);
+
+    const profile = tracker.getProfile();
+    expect(profile.domains.has('solana')).toBe(true);
+    expect(profile.domains.get('solana')!.weightedSessionCount).toBeGreaterThan(0);
+    expect(profile.primaryDomain).toBe('solana');
+  });
+
+  test('updateFromImports: weights by file fraction (spoofing resistance)', () => {
+    const tracker = new DomainTracker();
+    // 2 out of 4 files have react imports
+    const importCache = new Map<string, Set<string>>([
+      ['src/a.tsx', new Set(['react'])],
+      ['src/b.tsx', new Set(['react-dom'])],
+      ['src/c.ts', new Set(['lodash'])],
+      ['src/d.ts', new Set(['express'])],
+    ]);
+
+    tracker.updateFromImports(importCache, 0.8); // R=0.8 → weight=0.9
+
+    const profile = tracker.getProfile();
+    const reactExposure = profile.domains.get('react')!;
+    // Contribution = weight(0.9) × fraction(2/4 = 0.5) = 0.45
+    expect(reactExposure.weightedSessionCount).toBeCloseTo(0.45, 2);
+  });
+
+  test('updateFromImports: does not increment rawSessionCount', () => {
+    const tracker = new DomainTracker();
+    const importCache = new Map<string, Set<string>>([
+      ['src/a.ts', new Set(['@solana/web3.js'])],
+    ]);
+
+    tracker.updateFromImports(importCache, 0.5);
+
+    const profile = tracker.getProfile();
+    // rawSessionCount should remain 0 — import signal supplements, doesn't replace
+    expect(profile.domains.get('solana')!.rawSessionCount).toBe(0);
+  });
+
+  test('updateFromImports: accumulates with existing update() exposure', () => {
+    const tracker = new DomainTracker();
+
+    // First: tool-pattern-based detection
+    tracker.update(createTestActionLog({
+      toolCalls: [
+        makeToolCall({ tool: 'Bash', args: { cmd: 'anchor build' }, success: true }),
+      ],
+    }), 0.8);
+
+    const before = tracker.getProfile().domains.get('solana')!.weightedSessionCount;
+
+    // Then: import-based detection adds more
+    const importCache = new Map<string, Set<string>>([
+      ['src/lib.ts', new Set(['@solana/web3.js'])],
+    ]);
+    tracker.updateFromImports(importCache, 0.8);
+
+    const after = tracker.getProfile().domains.get('solana')!.weightedSessionCount;
+    expect(after).toBeGreaterThan(before);
+  });
+
+  test('updateFromImports: negative R reduces contribution', () => {
+    const tracker = new DomainTracker();
+    const importCache = new Map<string, Set<string>>([
+      ['src/a.ts', new Set(['react'])],
+    ]);
+
+    // R=-1 → weight = max(0.1, (-1+1)/2) = max(0.1, 0) = 0.1
+    tracker.updateFromImports(importCache, -1);
+
+    const profile = tracker.getProfile();
+    // Contribution = 0.1 × (1/1) = 0.1
+    expect(profile.domains.get('react')!.weightedSessionCount).toBeCloseTo(0.1, 2);
   });
 });
 
@@ -2964,6 +3210,942 @@ describe('Phase 2: Consolidation + Wiring', () => {
       // The expertise field in later snapshots should be > 0
       // because DomainTracker.getExpertise() incorporates curvature
       expect(typeof snapshots[2].expertise).toBe('number');
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Import-based domain classification wiring
+  // ---------------------------------------------------------------------------
+
+  describe('import-based domain classification wiring', () => {
+    test('setImportCache feeds domains into DomainTracker during endObservation', async () => {
+      const storage = createInMemoryStorage();
+      const identity = createTestIdentity(storage);
+      await identity.initialize([0.5, 0.5, 0.5, 0.5]);
+
+      // Before: no solana domain exposure
+      const profileBefore = identity.getDomainProfile()!;
+      expect(profileBefore.domains.has('solana')).toBe(false);
+
+      identity.startObservation('import-test-1');
+      identity.recordToolCall('Write', { file: 'src/app.ts' }, 'ok', true, 100);
+
+      // Feed solana imports before endObservation
+      const importCache = new Map<string, Set<string>>([
+        ['src/app.ts', new Set(['@solana/web3.js', '@solana/spl-token'])],
+        ['src/utils.ts', new Set(['@solana/web3.js'])],
+      ]);
+      identity.setImportCache(importCache);
+
+      await identity.endObservation(createTestInteraction('import-test-1'));
+
+      // After: solana domain should exist with positive weighted exposure
+      const profileAfter = identity.getDomainProfile()!;
+      expect(profileAfter.domains.has('solana')).toBe(true);
+      expect(profileAfter.domains.get('solana')!.weightedSessionCount).toBeGreaterThan(0);
+      // rawSessionCount stays 0 — imports supplement, don't replace
+      expect(profileAfter.domains.get('solana')!.rawSessionCount).toBe(0);
+
+      // Import cache should be consumed (a second observation without
+      // new setImportCache should not double-count)
+      identity.startObservation('import-test-2');
+      identity.recordToolCall('Read', { file: 'src/b.ts' }, 'ok', true, 100);
+      await identity.endObservation(createTestInteraction('import-test-2'));
+
+      // The solana exposure should NOT have increased from imports
+      // (only from tool-pattern heuristics, if any matched)
+      const profileFinal = identity.getDomainProfile()!;
+      const solanaExposure = profileFinal.domains.get('solana')!;
+      expect(solanaExposure.weightedSessionCount).toBeCloseTo(
+        profileAfter.domains.get('solana')!.weightedSessionCount,
+        4, // allow tiny floating point variance from tool-pattern detection
+      );
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Signal Persistence Pipeline — Observable Optimizer
+  // ---------------------------------------------------------------------------
+
+  describe('signal persistence pipeline', () => {
+    test('endObservation() captures a SignalSnapshot into signalHistory', async () => {
+      const storage = createInMemoryStorage();
+      const identity = createTestIdentity(storage);
+      await identity.initialize([0.5, 0.5, 0.5, 0.5]);
+
+      expect(identity.getSignalHistory()).toHaveLength(0);
+
+      identity.startObservation('sig-1');
+      identity.recordToolCall('Read', { file: 'src/a.ts' }, 'ok', true, 100);
+      identity.recordToolCall('Write', { file: 'src/b.ts' }, 'ok', true, 200);
+      await identity.endObservation(createTestInteraction('sig-1'));
+
+      const history = identity.getSignalHistory();
+      expect(history).toHaveLength(1);
+
+      const snap = history[0];
+      expect(snap.sessionIndex).toBe(0);
+      expect(typeof snap.timestamp).toBe('number');
+      expect(snap.timestamp).toBeGreaterThan(0);
+      expect(typeof snap.R).toBe('number');
+      expect(Number.isFinite(snap.R)).toBe(true);
+      expect(snap.R).toBeGreaterThanOrEqual(-1);
+      expect(snap.R).toBeLessThanOrEqual(1);
+      expect(typeof snap.R_adj).toBe('number');
+      expect(Number.isFinite(snap.R_adj)).toBe(true);
+      expect(Array.isArray(snap.signals)).toBe(true);
+      expect(snap.signals.length).toBeGreaterThanOrEqual(5); // energy, tool_success, error_rate, user_signal, declaration, test_result, session_arc
+
+      // Every signal has the required shape
+      for (const sig of snap.signals) {
+        expect(typeof sig.source).toBe('string');
+        expect(typeof sig.value).toBe('number');
+        expect(typeof sig.weight).toBe('number');
+      }
+
+      // Core signals must be present
+      const sources = snap.signals.map(s => s.source);
+      expect(sources).toContain('energy');
+      expect(sources).toContain('tool_success');
+      expect(sources).toContain('error_rate');
+      expect(sources).toContain('session_arc');
+    });
+
+    test('capture happens before backward pass (ordering proof via sessionCount)', async () => {
+      const storage = createInMemoryStorage();
+      const identity = createTestIdentity(storage);
+      await identity.initialize([0.5, 0.5, 0.5, 0.5]);
+
+      // Pre-observation: sessionCount is 0
+      expect(identity.getARILSessionCount()).toBe(0);
+
+      // Spy captures the evaluator's output to verify value fidelity separately
+      let capturedOutcome: SessionOutcome | null = null;
+      const originalEvaluate = OutcomeEvaluator.prototype.evaluate;
+      OutcomeEvaluator.prototype.evaluate = function (this: OutcomeEvaluator, ...args: [any, any, any?]) {
+        const result = originalEvaluate.apply(this, args);
+        capturedOutcome = result;
+        return result;
+      };
+
+      try {
+        identity.startObservation('order-1');
+        identity.recordToolCall('Read', { file: 'x.ts' }, 'ok', true, 50);
+        identity.recordToolCall('Edit', { file: 'x.ts' }, 'ok', true, 100);
+        await identity.endObservation(createTestInteraction('order-1'));
+
+        // Spy must have fired (fails safely if evaluate() stops being called)
+        expect(capturedOutcome).not.toBeNull();
+
+        // ORDERING PROOF: computeARILUpdate() increments sessionCount from 0→1.
+        // The snapshot captures sessionIndex = arilState.sessionCount BEFORE the
+        // backward pass runs. If capture moved after computeARILUpdate(), the
+        // snapshot would have sessionIndex=1 instead of 0.
+        const history = identity.getSignalHistory();
+        expect(history).toHaveLength(1);
+        expect(history[0].sessionIndex).toBe(0);              // Pre-increment value
+        expect(identity.getARILSessionCount()).toBe(1);        // Post-increment value
+
+        // Confirm the backward pass actually ran (weights changed from initial)
+        const state = identity.getState();
+        const weightsChanged = state!.w.some((w: number) => Math.abs(w - 0.5) > 1e-10);
+        expect(weightsChanged).toBe(true);
+
+        // VALUE FIDELITY: snapshot R/signals match evaluator output exactly
+        expect(history[0].R).toBe(capturedOutcome!.R);
+        expect(history[0].R_adj).toBe(capturedOutcome!.R_adj);
+        expect(history[0].signals.length).toBe(capturedOutcome!.signals.length);
+        for (let i = 0; i < history[0].signals.length; i++) {
+          expect(history[0].signals[i].source).toBe(capturedOutcome!.signals[i].source);
+          expect(history[0].signals[i].value).toBe(capturedOutcome!.signals[i].value);
+          expect(history[0].signals[i].weight).toBe(capturedOutcome!.signals[i].weight);
+        }
+      } finally {
+        OutcomeEvaluator.prototype.evaluate = originalEvaluate;
+      }
+    });
+
+    test('defensive copy: mutating evaluator outcome does not corrupt signalHistory', async () => {
+      const storage = createInMemoryStorage();
+      const identity = createTestIdentity(storage);
+      await identity.initialize([0.5, 0.5, 0.5, 0.5]);
+
+      // Spy captures the evaluator's internal signal array reference
+      let capturedSignals: OutcomeSignal[] | null = null;
+      const originalEvaluate = OutcomeEvaluator.prototype.evaluate;
+      OutcomeEvaluator.prototype.evaluate = function (this: OutcomeEvaluator, ...args: [any, any, any?]) {
+        const result = originalEvaluate.apply(this, args);
+        capturedSignals = result.signals;
+        return result;
+      };
+
+      try {
+        identity.startObservation('copy-1');
+        identity.recordToolCall('Read', { file: 'z.ts' }, 'ok', true, 100);
+        await identity.endObservation(createTestInteraction('copy-1'));
+
+        expect(capturedSignals).not.toBeNull();
+        const history = identity.getSignalHistory();
+        expect(history).toHaveLength(1);
+
+        // Snapshot values before mutation
+        const originalValues = history[0].signals.map(s => s.value);
+        const originalSources = history[0].signals.map(s => s.source);
+        const originalLength = history[0].signals.length;
+
+        // Mutate the evaluator's internal signal array: push garbage, overwrite fields
+        capturedSignals!.push({ source: 'energy', value: 999, weight: 999 });
+        if (capturedSignals!.length > 0) {
+          (capturedSignals![0] as any).value = -999;
+          (capturedSignals![0] as any).source = 'CORRUPTED';
+        }
+
+        // signalHistory must be unchanged — the .map() defensive copy protects it
+        expect(history[0].signals.length).toBe(originalLength);
+        expect(history[0].signals.map(s => s.value)).toEqual(originalValues);
+        expect(history[0].signals.map(s => s.source)).toEqual(originalSources);
+
+        // SHALLOW COPY SUFFICIENCY GUARD: OutcomeSignal currently has only primitive
+        // fields (string, number). If someone adds a nested object, this assertion
+        // breaks — signaling that .map(s => ({...s})) needs a deep copy.
+        for (const sig of history[0].signals) {
+          for (const val of Object.values(sig)) {
+            expect(['string', 'number'].includes(typeof val)).toBe(true);
+          }
+        }
+      } finally {
+        OutcomeEvaluator.prototype.evaluate = originalEvaluate;
+      }
+    });
+
+    test('write-path cap: signalHistory limited to 20 entries via shift()', async () => {
+      const storage = createInMemoryStorage();
+      const identity = createTestIdentity(storage);
+      await identity.initialize([0.5, 0.5, 0.5, 0.5]);
+
+      // Run 25 observations on the same instance (no serialization involved)
+      for (let i = 0; i < 25; i++) {
+        identity.startObservation(`cap-${i}`);
+        identity.recordToolCall('Read', { file: `f${i}.ts` }, 'ok', true, 50);
+        await identity.endObservation(createTestInteraction(`cap-${i}`));
+      }
+
+      const history = identity.getSignalHistory();
+      expect(history).toHaveLength(20);
+
+      // First entry should be session 5 (0-4 were shifted out)
+      expect(history[0].sessionIndex).toBe(5);
+      // Last entry should be session 24
+      expect(history[19].sessionIndex).toBe(24);
+
+      // All 20 entries should have sequential session indices
+      for (let i = 0; i < 20; i++) {
+        expect(history[i].sessionIndex).toBe(5 + i);
+      }
+
+      // Uniqueness: no duplicate sessionIndex values (guards against partial-failure bugs
+      // where sessionCount might not increment but a snapshot was already captured)
+      const uniqueIndices = new Set(history.map(h => h.sessionIndex));
+      expect(uniqueIndices.size).toBe(20);
+    });
+
+    test('full integration: realistic session produces meaningful signal decomposition', async () => {
+      const storage = createInMemoryStorage();
+      const identity = createTestIdentity(storage);
+      await identity.initialize([0.5, 0.5, 0.5, 0.5]);
+
+      // Build a realistic explore → implement → fail → fix → pass session
+      const bashFailResult = 'FAIL src/component.test.ts\n\nTests:  3 failed, 10 passed, 13 total\nTest Suites: 1 failed, 3 passed, 4 total';
+      const bashPassResult = 'PASS src/component.test.ts\n\nTests:  13 passed, 13 total\nTest Suites: 4 passed, 4 total';
+
+      identity.startObservation('full-1');
+
+      // Phase 1: Explore
+      identity.recordToolCall('Read', { file: 'src/component.ts' }, 'export function render() { ... }', true, 80);
+      identity.recordToolCall('Grep', { pattern: 'handleClick' }, 'src/component.ts:42', true, 60);
+      identity.recordToolCall('Read', { file: 'src/component.test.ts' }, 'describe("render", () => ...)', true, 90);
+
+      // Phase 2: Implement (read-before-edit pattern)
+      identity.recordToolCall('Edit', { file: 'src/component.ts' }, 'ok', true, 150);
+      identity.recordToolCall('Write', { file: 'src/utils.ts' }, 'ok', true, 120);
+
+      // Phase 3: Verify — first run fails
+      identity.recordToolCall('Bash', { command: 'npm test' }, bashFailResult, false, 3000);
+
+      // Fix
+      identity.recordToolCall('Edit', { file: 'src/component.ts' }, 'ok', true, 100);
+
+      // Tests pass after fix
+      identity.recordToolCall('Bash', { command: 'npm test' }, bashPassResult, true, 2500);
+
+      await identity.endObservation(createTestInteraction('full-1'));
+
+      const history = identity.getSignalHistory();
+      expect(history).toHaveLength(1);
+
+      const snap = history[0];
+      const signalMap = new Map(snap.signals.map(s => [s.source, s]));
+
+      // --- Compute expected values from the SAME functions the pipeline uses ---
+      // This couples the test to scoring logic, not to hardcoded thresholds.
+      const referenceToolCalls = [
+        { tool: 'Read', args: { file: 'src/component.ts' }, result: 'ok', success: true },
+        { tool: 'Grep', args: { pattern: 'handleClick' }, result: 'ok', success: true },
+        { tool: 'Read', args: { file: 'src/component.test.ts' }, result: 'ok', success: true },
+        { tool: 'Edit', args: { file: 'src/component.ts' }, result: 'ok', success: true },
+        { tool: 'Write', args: { file: 'src/utils.ts' }, result: 'ok', success: true },
+        { tool: 'Bash', args: { command: 'npm test' }, result: bashFailResult, success: false },
+        { tool: 'Edit', args: { file: 'src/component.ts' }, result: 'ok', success: true },
+        { tool: 'Bash', args: { command: 'npm test' }, result: bashPassResult, success: true },
+      ];
+      const referenceActionLog = { toolCalls: referenceToolCalls, decisions: [], failures: [] } as any;
+
+      const expectedTestSignal = extractTestSignal(referenceActionLog);
+      const expectedArcSignal = extractSessionArcSignal(referenceActionLog);
+
+      // --- Structural: all expected signal sources present ---
+      expect(signalMap.has('energy')).toBe(true);
+      expect(signalMap.has('tool_success')).toBe(true);
+      expect(signalMap.has('error_rate')).toBe(true);
+      expect(signalMap.has('test_result')).toBe(true);
+      expect(signalMap.has('session_arc')).toBe(true);
+
+      // --- Signal weights match configured values ---
+      expect(signalMap.get('tool_success')!.weight).toBe(DEFAULT_OUTCOME_CONFIG.weights.toolSuccess);
+      expect(signalMap.get('error_rate')!.weight).toBe(DEFAULT_OUTCOME_CONFIG.weights.errorRate);
+      expect(signalMap.get('session_arc')!.weight).toBe(DEFAULT_OUTCOME_CONFIG.weights.sessionArc);
+
+      // --- Signal values match independent computation from the same functions ---
+      const testSig = signalMap.get('test_result')!;
+      expect(testSig.value).toBe(expectedTestSignal.value);
+      expect(testSig.weight).toBe(expectedTestSignal.weight);
+
+      const arcSig = signalMap.get('session_arc')!;
+      expect(arcSig.value).toBe(expectedArcSignal.value);
+      expect(arcSig.weight).toBe(expectedArcSignal.weight);
+
+      // --- Directional: tool_success > 0 (more successes than failures) ---
+      expect(signalMap.get('tool_success')!.value).toBeGreaterThan(0);
+
+      // --- Aggregate R is positive for a session with passing tests ---
+      expect(snap.R).toBeGreaterThan(0);
+
+      // --- INVARIANT: R is self-consistent with signal decomposition ---
+      // This must hold regardless of scoring logic changes.
+      let wSum = 0, vwSum = 0;
+      for (const sig of snap.signals) {
+        vwSum += sig.value * sig.weight;
+        wSum += sig.weight;
+      }
+      const expectedR = wSum > 0 ? vwSum / wSum : 0;
+      expect(snap.R).toBeCloseTo(expectedR, 5);
+    });
+
+    test('getSignalHistory() returns defensive copy (getter mutation isolation)', async () => {
+      const storage = createInMemoryStorage();
+      const identity = createTestIdentity(storage);
+      await identity.initialize([0.5, 0.5, 0.5, 0.5]);
+
+      identity.startObservation('getter-1');
+      identity.recordToolCall('Read', { file: 'a.ts' }, 'ok', true, 50);
+      await identity.endObservation(createTestInteraction('getter-1'));
+
+      const first = identity.getSignalHistory();
+      expect(first).toHaveLength(1);
+
+      // Mutate the returned array: push, splice, overwrite
+      (first as any[]).push({ sessionIndex: 999, timestamp: 0, R: 0, R_adj: 0, signals: [] });
+      (first as any[]).splice(0, 1);
+
+      // Second call returns a fresh copy — internal state is unaffected
+      const second = identity.getSignalHistory();
+      expect(second).toHaveLength(1);
+      expect(second[0].sessionIndex).toBe(0);
+
+      // The two references are different objects
+      expect(first).not.toBe(second);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Audit Trail (Phase 2 Fields)
+  // ---------------------------------------------------------------------------
+
+  describe('audit trail (Phase 2 fields)', () => {
+    test('endObservation() populates all Phase 2 fields with correct dimensions', async () => {
+      const storage = createInMemoryStorage();
+      const identity = createTestIdentity(storage);
+      await identity.initialize([0.5, 0.5, 0.5, 0.5]);
+
+      identity.startObservation('audit-1');
+      identity.recordToolCall('Read', { file: 'a.ts' }, 'code', true, 80);
+      identity.recordToolCall('Edit', { file: 'a.ts' }, 'ok', true, 100);
+      await identity.endObservation(createTestInteraction('audit-1'));
+
+      const history = identity.getSignalHistory();
+      expect(history).toHaveLength(1);
+      const snap = history[0];
+
+      // Phase 1 fields: always present
+      expect(snap.sessionIndex).toBe(0);
+      expect(typeof snap.R).toBe('number');
+      expect(typeof snap.R_adj).toBe('number');
+      expect(snap.signals.length).toBeGreaterThan(0);
+
+      // Phase 2 fields: must be present after first full session
+      expect(snap.weightsSessionStart).toBeDefined();
+      expect(snap.weightsBefore).toBeDefined();
+      expect(snap.weightsAfter).toBeDefined();
+      expect(snap.deltaW).toBeDefined();
+      expect(snap.gradients).toBeDefined();
+      expect(snap.attributions).toBeDefined();
+      expect(snap.metaLearningRates).toBeDefined();
+      expect(snap.fitness).toBeDefined();
+
+      // All Phase 2 arrays must match the identity dimension count (4)
+      expect(snap.weightsSessionStart).toHaveLength(4);
+      expect(snap.weightsBefore).toHaveLength(4);
+      expect(snap.weightsAfter).toHaveLength(4);
+      expect(snap.deltaW).toHaveLength(4);
+      expect(snap.gradients!.energy).toHaveLength(4);
+      expect(snap.gradients!.outcome).toHaveLength(4);
+      expect(snap.gradients!.replicator).toHaveLength(4);
+      expect(snap.attributions).toHaveLength(4);
+      expect(snap.metaLearningRates).toHaveLength(4);
+      expect(snap.fitness).toHaveLength(4);
+
+      // Möbius audit fields (scalars, not dimension-length arrays)
+      // Session 1: below minObservations=20, so blend is 0 and mobiusV is absent
+      expect(snap.blendAlpha).toBe(0);
+      expect(snap.mobiusV).toBeUndefined();
+
+      // All values must be finite (no NaN/Infinity contamination)
+      for (const arr of [snap.weightsSessionStart!, snap.weightsBefore!, snap.weightsAfter!, snap.deltaW!,
+        snap.gradients!.energy, snap.gradients!.outcome, snap.gradients!.replicator,
+        snap.attributions!, snap.metaLearningRates!, snap.fitness!]) {
+        for (const v of arr) {
+          expect(Number.isFinite(v)).toBe(true);
+        }
+      }
+      expect(Number.isFinite(snap.blendAlpha)).toBe(true);
+    });
+
+    test('three weight snapshots trace session→PDE→ARIL pipeline', async () => {
+      const storage = createInMemoryStorage();
+      const identity = createTestIdentity(storage);
+      const initialWeights = [0.5, 0.5, 0.5, 0.5];
+      await identity.initialize(initialWeights);
+
+      identity.startObservation('wb-1');
+      identity.recordToolCall('Read', { file: 'x.ts' }, 'export class Foo {}', true, 80);
+      identity.recordToolCall('Edit', { file: 'x.ts' }, 'ok', true, 100);
+      // Record a bash test to generate meaningful R signal
+      identity.recordToolCall('Bash', { command: 'npm test' },
+        'PASS src/test.ts\n\nTests:  5 passed, 5 total\nTest Suites: 1 passed, 1 total', true, 200);
+      await identity.endObservation(createTestInteraction('wb-1'));
+
+      const snap = identity.getSignalHistory()[0];
+
+      // weightsSessionStart = preBridgeWeights = the actual session-start state
+      // For session 1, this should match the initial weights exactly
+      for (let i = 0; i < 4; i++) {
+        expect(snap.weightsSessionStart![i]).toBeCloseTo(initialWeights[i], 8);
+      }
+
+      // weightsBefore = post-PDE, pre-ARIL. PDE evolution may shift weights,
+      // making weightsBefore differ from weightsSessionStart.
+      // Both must be in valid bounds.
+      for (let i = 0; i < 4; i++) {
+        expect(snap.weightsBefore![i]).toBeGreaterThanOrEqual(DEFAULT_ARIL_CONFIG.minWeight);
+        expect(snap.weightsBefore![i]).toBeLessThanOrEqual(DEFAULT_ARIL_CONFIG.maxWeight);
+      }
+
+      // The PDE gap: weightsSessionStart → weightsBefore shows what PDE did
+      // (may be zero if PDE produces no change, but the field must be populated)
+      const pdeChange = snap.weightsBefore!.map(
+        (w, i) => w - snap.weightsSessionStart![i]
+      );
+      // pdeChange is computable — even if all zeros, we can verify the relationship exists
+      expect(pdeChange).toHaveLength(4);
+
+      // weightsAfter should differ from weightsBefore — the ARIL backward pass ran
+      const anyARILChange = snap.weightsAfter!.some(
+        (w, i) => Math.abs(w - snap.weightsBefore![i]) > 1e-15
+      );
+      expect(anyARILChange).toBe(true);
+
+      // weightsAfter must also be in valid bounds
+      for (let i = 0; i < 4; i++) {
+        expect(snap.weightsAfter![i]).toBeGreaterThanOrEqual(DEFAULT_ARIL_CONFIG.minWeight);
+        expect(snap.weightsAfter![i]).toBeLessThanOrEqual(DEFAULT_ARIL_CONFIG.maxWeight);
+      }
+    });
+
+    test('deltaW self-consistency: weightsAfter = clamp(weightsBefore + deltaW)', async () => {
+      const storage = createInMemoryStorage();
+      const identity = createTestIdentity(storage);
+      await identity.initialize([0.5, 0.5, 0.5, 0.5]);
+
+      identity.startObservation('dw-1');
+      identity.recordToolCall('Read', { file: 'b.ts' }, 'code', true, 80);
+      identity.recordToolCall('Edit', { file: 'b.ts' }, 'ok', true, 100);
+      await identity.endObservation(createTestInteraction('dw-1'));
+
+      const snap = identity.getSignalHistory()[0];
+      const { minWeight, maxWeight } = DEFAULT_ARIL_CONFIG;
+
+      // The algebraic invariant: applyARILUpdate does
+      //   newWeights[i] = clamp(weights[i] + deltaW[i], minWeight, maxWeight)
+      // So weightsAfter[i] must equal clamp(weightsBefore[i] + deltaW[i])
+      for (let i = 0; i < 4; i++) {
+        const expected = Math.min(maxWeight, Math.max(minWeight, snap.weightsBefore![i] + snap.deltaW![i]));
+        expect(snap.weightsAfter![i]).toBeCloseTo(expected, 10);
+      }
+    });
+
+    test('gradient decomposition: clipped sum of components equals deltaW', async () => {
+      const storage = createInMemoryStorage();
+      const identity = createTestIdentity(storage);
+      await identity.initialize([0.5, 0.5, 0.5, 0.5]);
+
+      identity.startObservation('grad-1');
+      identity.recordToolCall('Read', { file: 'c.ts' }, 'code', true, 80);
+      identity.recordToolCall('Edit', { file: 'c.ts' }, 'ok', true, 100);
+      await identity.endObservation(createTestInteraction('grad-1'));
+
+      const snap = identity.getSignalHistory()[0];
+      const { clipGradient } = DEFAULT_ARIL_CONFIG;
+
+      for (let i = 0; i < 4; i++) {
+        const rawSum = snap.gradients!.energy[i] + snap.gradients!.outcome[i] + snap.gradients!.replicator[i];
+
+        // deltaW[i] = clamp(rawSum, -clipGradient, clipGradient)
+        const expectedDelta = Math.min(clipGradient, Math.max(-clipGradient, rawSum));
+        expect(snap.deltaW![i]).toBeCloseTo(expectedDelta, 10);
+
+        // Gradient clipping bound: |deltaW[i]| <= clipGradient
+        expect(Math.abs(snap.deltaW![i])).toBeLessThanOrEqual(clipGradient + 1e-15);
+      }
+    });
+
+    test('metaLearningRates: activation-boundary ordering proof + liveness', async () => {
+      const storage = createInMemoryStorage();
+      const identity = createTestIdentity(storage);
+      await identity.initialize([0.5, 0.5, 0.5, 0.5]);
+
+      // Run (threshold - 1) sessions: neuroplasticity inactive.
+      // COUPLING: depends on MIN_NEUROPLASTICITY_SESSIONS (currently 3).
+      // If that constant changes, this test auto-adjusts.
+      const threshold = MIN_NEUROPLASTICITY_SESSIONS;
+      for (let s = 1; s < threshold; s++) {
+        identity.startObservation(`meta-${s}`);
+        identity.recordToolCall('Read', { file: `m${s}.ts` }, 'code', true, 80);
+        await identity.endObservation(createTestInteraction(`meta-${s}`));
+      }
+
+      const historyAfter2 = identity.getSignalHistory();
+      for (const snap of historyAfter2) {
+        for (let i = 0; i < 4; i++) {
+          expect(snap.metaLearningRates![i]).toBeCloseTo(1.0, 8);
+        }
+      }
+
+      // --- ORDERING PROOF (activation boundary) ---
+      // Session `threshold`: neuroplasticity activates for the first time
+      // (recentAttributions.length hits MIN_NEUROPLASTICITY_SESSIONS).
+      // computeARILUpdate WILL mutate metaLearningRates during this session.
+      // If Phase 1 captures BEFORE mutation → rates still 1.0.
+      // If Phase 1 captures AFTER mutation → rates would have changed (bug).
+      // This is the one boundary where ground truth is known: rates have never
+      // been mutated before this session, so pre-mutation must equal the default.
+      identity.startObservation(`meta-${threshold}`);
+      identity.recordToolCall('Read', { file: `m${threshold}.ts` }, 'code', true, 80);
+      identity.recordToolCall('Edit', { file: `m${threshold}.ts` }, 'ok', true, 100);
+      await identity.endObservation(createTestInteraction(`meta-${threshold}`));
+
+      const historyAtBoundary = identity.getSignalHistory();
+      const snapBoundary = historyAtBoundary[historyAtBoundary.length - 1];
+      // THE ORDERING ASSERTION: activation-boundary session captured rates = 1.0 (pre-mutation)
+      for (let i = 0; i < 4; i++) {
+        expect(snapBoundary.metaLearningRates![i]).toBeCloseTo(1.0, 8);
+      }
+
+      // --- LIVENESS CHECK (consecutive snapshots) ---
+      // Sessions (threshold+1) and (threshold+2) verify neuroplasticity is actually
+      // running and producing different rate mutations. This is NOT an ordering proof
+      // (post-mutation consecutive snapshots would also differ). It guards against
+      // neuroplasticity silently breaking while the activation-boundary test passes.
+      const s1 = threshold + 1;
+      identity.startObservation(`meta-${s1}`);
+      identity.recordToolCall('Bash', { command: 'npm test' },
+        'PASS src/test.ts\n\nTests:  8 passed, 8 total\nTest Suites: 2 passed, 2 total', true, 200);
+      identity.recordToolCall('Read', { file: `m${s1}a.ts` }, 'import { x } from "./y"', true, 60);
+      identity.recordToolCall('Edit', { file: `m${s1}a.ts` }, 'ok', true, 120);
+      identity.recordToolCall('Write', { file: `m${s1}b.ts` }, 'ok', true, 80);
+      await identity.endObservation(createTestInteraction(`meta-${s1}`));
+
+      const s2 = threshold + 2;
+      identity.startObservation(`meta-${s2}`);
+      identity.recordToolCall('Read', { file: `m${s2}.ts` }, 'code', true, 80);
+      await identity.endObservation(createTestInteraction(`meta-${s2}`));
+
+      const finalHistory = identity.getSignalHistory();
+      const snapA = finalHistory.find(s => s.sessionIndex === threshold)!;
+      const snapB = finalHistory.find(s => s.sessionIndex === threshold + 1)!;
+
+      // Liveness: consecutive snapshots have different rates (neuroplasticity is running)
+      expect(snapA.metaLearningRates).toHaveLength(4);
+      expect(snapB.metaLearningRates).toHaveLength(4);
+      const ratesDiffer = snapB.metaLearningRates!.some(
+        (r, i) => Math.abs(r - snapA.metaLearningRates![i]) > 1e-15
+      );
+      expect(ratesDiffer).toBe(true);
+    });
+
+    test('Phase 2 fields survive serialization round-trip', async () => {
+      const storage = createInMemoryStorage();
+      const identity = createTestIdentity(storage);
+      await identity.initialize([0.5, 0.5, 0.5, 0.5]);
+
+      identity.startObservation('rt-1');
+      identity.recordToolCall('Read', { file: 'r.ts' }, 'code', true, 80);
+      identity.recordToolCall('Edit', { file: 'r.ts' }, 'ok', true, 100);
+      await identity.endObservation(createTestInteraction('rt-1'));
+
+      const snap = identity.getSignalHistory()[0];
+
+      // Build a synthetic ARILState with this snapshot
+      const state: ARILState = {
+        fitness: new Float64Array([0.1, 0.2, 0.3, 0.4]),
+        metaLearningRates: new Float64Array([1.0, 1.0, 1.0, 1.0]),
+        recentAttributions: [],
+        sessionCount: 1,
+        signalHistory: [snap],
+      };
+
+      const serialized = serializeARILState(state);
+      const deserialized = deserializeARILState(serialized);
+
+      expect(deserialized.signalHistory).toHaveLength(1);
+      const roundTripped = deserialized.signalHistory[0];
+
+      // Phase 1 fields
+      expect(roundTripped.sessionIndex).toBe(snap.sessionIndex);
+      expect(roundTripped.R).toBeCloseTo(snap.R, 10);
+      expect(roundTripped.R_adj).toBeCloseTo(snap.R_adj, 10);
+      expect(roundTripped.signals).toEqual(snap.signals);
+
+      // Phase 2 fields — each must survive round-trip exactly
+      expect(roundTripped.weightsSessionStart).toEqual(snap.weightsSessionStart);
+      expect(roundTripped.weightsBefore).toEqual(snap.weightsBefore);
+      expect(roundTripped.weightsAfter).toEqual(snap.weightsAfter);
+      expect(roundTripped.deltaW).toEqual(snap.deltaW);
+      expect(roundTripped.gradients).toEqual(snap.gradients);
+      expect(roundTripped.attributions).toEqual(snap.attributions);
+      expect(roundTripped.metaLearningRates).toEqual(snap.metaLearningRates);
+      expect(roundTripped.fitness).toEqual(snap.fitness);
+      expect(roundTripped.blendAlpha).toBe(snap.blendAlpha);
+      expect(roundTripped.mobiusV).toBe(snap.mobiusV);
+    });
+
+    test('deserialization strips malformed Phase 2 fields without rejecting snapshot', () => {
+      // A snapshot with valid Phase 1 but corrupt Phase 2 must survive deserialization
+      // with Phase 2 fields stripped (RT-H8 pattern: per-field validation, not all-or-nothing)
+      const validSnapshot = {
+        sessionIndex: 0,
+        timestamp: Date.now(),
+        R: 0.5,
+        R_adj: 0.3,
+        signals: [{ source: 'test', value: 0.5, weight: 1.0 }],
+        // Corrupt Phase 2 fields:
+        weightsSessionStart: [NaN, 0.5, 0.5, 0.5], // NaN poisons the array
+        weightsBefore: [0.5, NaN, 0.5, 0.5], // NaN poisons the array
+        weightsAfter: [0.5, 0.5, 0.5, 0.5],  // This one is valid
+        deltaW: 'not an array',                // Wrong type
+        gradients: { energy: [1], outcome: [Infinity], replicator: [1] }, // Infinity
+        attributions: [],                       // Empty array (isFiniteArray rejects length 0)
+        metaLearningRates: [1.0, 1.0, 1.0, 1.0], // Valid
+        fitness: null,                          // Wrong type
+        blendAlpha: NaN,                        // Invalid scalar
+        mobiusV: Infinity,                      // Invalid scalar
+      };
+
+      const state = {
+        fitness: [0.1, 0.2],
+        metaLearningRates: [1.0, 1.0],
+        recentAttributions: [],
+        sessionCount: 1,
+        signalHistory: [validSnapshot],
+      };
+
+      const deserialized = deserializeARILState(state as any);
+      expect(deserialized.signalHistory).toHaveLength(1);
+      const snap = deserialized.signalHistory[0];
+
+      // Phase 1 fields preserved
+      expect(snap.sessionIndex).toBe(0);
+      expect(snap.R).toBe(0.5);
+      expect(snap.R_adj).toBe(0.3);
+      expect(snap.signals).toHaveLength(1);
+
+      // Malformed Phase 2 fields stripped
+      expect(snap.weightsSessionStart).toBeUndefined(); // Had NaN
+      expect(snap.weightsBefore).toBeUndefined(); // Had NaN
+      expect(snap.weightsAfter).toEqual([0.5, 0.5, 0.5, 0.5]); // Was valid
+      expect(snap.deltaW).toBeUndefined();         // Was wrong type
+      expect(snap.gradients).toBeUndefined();       // Had Infinity
+      expect(snap.attributions).toBeUndefined();    // Was empty array
+      expect(snap.metaLearningRates).toEqual([1.0, 1.0, 1.0, 1.0]); // Was valid
+      expect(snap.fitness).toBeUndefined();         // Was null
+      expect(snap.blendAlpha).toBeUndefined();      // NaN stripped
+      expect(snap.mobiusV).toBeUndefined();         // Infinity stripped
+    });
+
+    test('attribution efficiency: Σφ = R in cold-start regime (sessions 1-4)', async () => {
+      // Sessions 1-4: weight-change fallback value function, no Möbius blending.
+      //   v(S) = R · Σ_{i∈S} |Δw[i]| / Σ_j |Δw[j]|
+      // So v(N)=R, v(∅)=0. By Shapley efficiency: Σδ[i] = R.
+      const storage = createInMemoryStorage();
+      const identity = createTestIdentity(storage);
+      await identity.initialize([0.5, 0.5, 0.5, 0.5]);
+
+      identity.startObservation('attr-1');
+      identity.recordToolCall('Read', { file: 'a.ts' }, 'code', true, 80);
+      identity.recordToolCall('Edit', { file: 'a.ts' }, 'ok', true, 100);
+      identity.recordToolCall('Bash', { command: 'npm test' },
+        'PASS src/test.ts\n\nTests:  5 passed, 5 total\nTest Suites: 1 passed, 1 total', true, 200);
+      await identity.endObservation(createTestInteraction('attr-1'));
+
+      const snap = identity.getSignalHistory()[0];
+      expect(snap.attributions).toHaveLength(4);
+
+      const anyNonZero = snap.attributions!.some(a => Math.abs(a) > 1e-10);
+      expect(anyNonZero).toBe(true);
+
+      const attrSum = snap.attributions!.reduce((a, b) => a + b, 0);
+      expect(attrSum).toBeCloseTo(snap.R, 2);
+    });
+
+    test('attribution efficiency: Σφ = R in correlation regime (sessions 5-8)', async () => {
+      // Sessions 5+: correlation-based value function activates
+      //   (ShapleyAttributor: history.sessionCount >= 5).
+      //   v(S) = R · Σ_{i∈S} |corr[i]| / Z  where Z = Σ_j |corr[j]|
+      //   v(N) = R·Z/Z = R, v(∅) = 0. So Σφ = R still holds.
+      // Möbius blending requires 20+ observations (DEFAULT_MOBIUS_CONFIG.minObservations)
+      // so it's NOT active here. This is the primary production regime.
+      const storage = createInMemoryStorage();
+      const identity = createTestIdentity(storage);
+      await identity.initialize([0.5, 0.5, 0.5, 0.5]);
+
+      // Varied tool patterns across 8 sessions to build correlation history
+      const patterns = [
+        // Session 1-2: explore-heavy
+        () => {
+          identity.recordToolCall('Read', { file: 'a.ts' }, 'code', true, 80);
+          identity.recordToolCall('Grep', { pattern: 'foo' }, 'a.ts:10', true, 60);
+        },
+        () => {
+          identity.recordToolCall('Read', { file: 'b.ts' }, 'code', true, 80);
+          identity.recordToolCall('Read', { file: 'c.ts' }, 'code', true, 70);
+        },
+        // Session 3-4: edit-heavy
+        () => {
+          identity.recordToolCall('Read', { file: 'd.ts' }, 'code', true, 80);
+          identity.recordToolCall('Edit', { file: 'd.ts' }, 'ok', true, 100);
+          identity.recordToolCall('Write', { file: 'e.ts' }, 'ok', true, 90);
+        },
+        () => {
+          identity.recordToolCall('Read', { file: 'f.ts' }, 'code', true, 80);
+          identity.recordToolCall('Edit', { file: 'f.ts' }, 'ok', true, 100);
+        },
+        // Session 5-8: full cycle (explore + implement + verify)
+        () => {
+          identity.recordToolCall('Read', { file: 'g.ts' }, 'code', true, 80);
+          identity.recordToolCall('Edit', { file: 'g.ts' }, 'ok', true, 100);
+          identity.recordToolCall('Bash', { command: 'npm test' },
+            'PASS src/g.test.ts\n\nTests:  3 passed, 3 total\nTest Suites: 1 passed, 1 total', true, 200);
+        },
+        () => {
+          identity.recordToolCall('Grep', { pattern: 'bar' }, 'h.ts:5', true, 60);
+          identity.recordToolCall('Read', { file: 'h.ts' }, 'code', true, 80);
+          identity.recordToolCall('Edit', { file: 'h.ts' }, 'ok', true, 100);
+          identity.recordToolCall('Bash', { command: 'npx jest' },
+            'PASS src/h.test.ts\n\nTests:  4 passed, 4 total\nTest Suites: 1 passed, 1 total', true, 180);
+        },
+        () => {
+          identity.recordToolCall('Read', { file: 'i.ts' }, 'code', true, 80);
+          identity.recordToolCall('Edit', { file: 'i.ts' }, 'ok', true, 100);
+          identity.recordToolCall('Bash', { command: 'npm test' },
+            'PASS src/i.test.ts\n\nTests:  2 passed, 2 total\nTest Suites: 1 passed, 1 total', true, 150);
+        },
+        () => {
+          identity.recordToolCall('Read', { file: 'j.ts' }, 'code', true, 80);
+          identity.recordToolCall('Edit', { file: 'j.ts' }, 'ok', true, 100);
+          identity.recordToolCall('Bash', { command: 'npm test' },
+            'PASS src/j.test.ts\n\nTests:  6 passed, 6 total\nTest Suites: 1 passed, 1 total', true, 200);
+        },
+      ];
+
+      for (let s = 0; s < 8; s++) {
+        identity.startObservation(`corr-${s}`);
+        patterns[s]();
+        await identity.endObservation(createTestInteraction(`corr-${s}`));
+      }
+
+      const history = identity.getSignalHistory();
+      // Verify efficiency holds for sessions in the correlation regime (index 5-7)
+      for (let s = 5; s <= 7; s++) {
+        const snap = history.find(h => h.sessionIndex === s)!;
+        expect(snap.attributions).toBeDefined();
+        expect(snap.attributions).toHaveLength(4);
+
+        const attrSum = snap.attributions!.reduce((a, b) => a + b, 0);
+        // Correlation-based v(N) = R·Z/Z = R, v(∅) = 0, so Σφ = R
+        expect(attrSum).toBeCloseTo(snap.R, 2);
+      }
+    });
+
+    test('Möbius blending algebraic invariant: Σφ = (1-α)·R + α·mobiusV (sessions 21+)', async () => {
+      // Möbius blending activates at minObservations=20. After that:
+      //   blended[i] = (1-α)·additive[i] + α·möbius[i]
+      //   Σ blended[i] = (1-α)·Σ_additive + α·Σ_möbius
+      //                = (1-α)·R + α·(v_learned(N) - v_learned(∅))
+      //
+      // The snapshot captures blendAlpha (= α) and mobiusV (= v(N)-v(∅)),
+      // so the invariant is directly testable from the audit trail.
+      const storage = createInMemoryStorage();
+      const identity = createTestIdentity(storage);
+      await identity.initialize([0.5, 0.5, 0.5, 0.5]);
+
+      // 22 sessions with varied patterns to build Möbius observations
+      for (let s = 0; s < 22; s++) {
+        identity.startObservation(`mob-${s}`);
+        identity.recordToolCall('Read', { file: `f${s}.ts` }, 'code', true, 80);
+        if (s % 2 === 0) {
+          identity.recordToolCall('Edit', { file: `f${s}.ts` }, 'ok', true, 100);
+        }
+        if (s % 3 === 0) {
+          identity.recordToolCall('Bash', { command: 'npm test' },
+            `PASS src/f${s}.test.ts\n\nTests:  ${s + 1} passed, ${s + 1} total\nTest Suites: 1 passed, 1 total`,
+            true, 200);
+        }
+        await identity.endObservation(createTestInteraction(`mob-${s}`));
+      }
+
+      const history = identity.getSignalHistory();
+      const lastSnap = history[history.length - 1];
+
+      // 1. Verify we're in the blended regime (not correlation-only)
+      expect(lastSnap.blendAlpha).toBeDefined();
+      expect(lastSnap.blendAlpha).toBeGreaterThan(0);
+      expect(lastSnap.mobiusV).toBeDefined();
+      expect(Number.isFinite(lastSnap.mobiusV)).toBe(true);
+
+      // 2. Attributions exist and are well-formed
+      expect(lastSnap.attributions).toBeDefined();
+      expect(lastSnap.attributions).toHaveLength(4);
+      for (const a of lastSnap.attributions!) {
+        expect(Number.isFinite(a)).toBe(true);
+      }
+
+      // 3. THE ALGEBRAIC INVARIANT: Σφ = (1-α)·R + α·mobiusV
+      //    This is exact in IEEE 754: the blend is a linear combination of
+      //    the additive sum (= R by Shapley efficiency) and the Möbius sum
+      //    (= v(N)-v(∅) by construction in shapleyFromMobius). The snapshot
+      //    captures these same values, so the invariant holds to float precision.
+      const attrSum = lastSnap.attributions!.reduce((a, b) => a + b, 0);
+      const expectedSum = (1 - lastSnap.blendAlpha!) * lastSnap.R
+                        + lastSnap.blendAlpha! * lastSnap.mobiusV!;
+      expect(attrSum).toBeCloseTo(expectedSum, 8);
+
+      // 4. Deviation from R is bounded by α·|M - R|.
+      //    At session 22: α = (22-20)/20 = 0.1. Both M and R ∈ [-1, 1],
+      //    so worst case |Σ - R| = 0.1 · |M - R| ≤ 0.1 · 2 = 0.2.
+      //    Bound: 0.3 (theoretical 0.2 + tolerance 0.1).
+      expect(Math.abs(attrSum - lastSnap.R)).toBeLessThan(0.3);
+    });
+
+    test('fitness EMA computable from first principles after session 1', async () => {
+      // After session 1 with initial fitness=[0,0,0,0] (createARILState default):
+      //   f[i] = (1-γ)·0 + γ·R_raw·|δ[i]| = γ·R_raw·|δ[i]|
+      // where γ = fitnessDecay = 0.1, R_raw = snap.R (raw, not adjusted),
+      // and δ[i] = snap.attributions[i] (Shapley values).
+      const storage = createInMemoryStorage();
+      const identity = createTestIdentity(storage);
+      await identity.initialize([0.5, 0.5, 0.5, 0.5]);
+
+      identity.startObservation('fit-1');
+      identity.recordToolCall('Read', { file: 'f.ts' }, 'code', true, 80);
+      identity.recordToolCall('Edit', { file: 'f.ts' }, 'ok', true, 100);
+      await identity.endObservation(createTestInteraction('fit-1'));
+
+      const snap = identity.getSignalHistory()[0];
+      const { fitnessDecay } = DEFAULT_ARIL_CONFIG;
+
+      // Compute expected fitness from first principles
+      for (let i = 0; i < 4; i++) {
+        const expectedFitness = fitnessDecay * snap.R * Math.abs(snap.attributions![i]);
+        expect(snap.fitness![i]).toBeCloseTo(expectedFitness, 10);
+      }
+    });
+
+    test('replicator gradient direction matches fitness ordering (field-swap detection)', async () => {
+      // The replicator gradient formula is:
+      //   replicator[i] = αᵣ · metaRate · (w[i]+μ) · (f[i] - f̄)
+      // After session 1, f[i] = γ·R·|δ[i]|. The dimension with the LARGEST |δ[i]|
+      // has the highest fitness, so (f[i] - f̄) > 0 → replicator[i] > 0.
+      //
+      // This test catches a field-swap bug: if someone accidentally stored
+      // energyGrad as replicator or vice versa, the direction relationship
+      // with fitness would break (because energy gradient is determined by
+      // the energy landscape, not by fitness ordering).
+      //
+      // IMPORTANT: Asymmetric initial weights [0.3, 0.5, 0.7, 0.5] force the
+      // PDE to evolve dimensions differently, producing asymmetric weight changes
+      // and therefore divergent attributions → divergent fitness → non-trivial
+      // replicator gradients. With symmetric [0.5,0.5,0.5,0.5], all attributions
+      // could be nearly uniform, causing every directional check to be skipped.
+      const storage = createInMemoryStorage();
+      const identity = createTestIdentity(storage);
+      await identity.initialize([0.3, 0.5, 0.7, 0.5]);
+
+      identity.startObservation('rep-1');
+      identity.recordToolCall('Read', { file: 'r.ts' }, 'code', true, 80);
+      identity.recordToolCall('Edit', { file: 'r.ts' }, 'ok', true, 100);
+      identity.recordToolCall('Bash', { command: 'npm test' },
+        'PASS src/test.ts\n\nTests:  5 passed, 5 total\nTest Suites: 1 passed, 1 total', true, 200);
+      await identity.endObservation(createTestInteraction('rep-1'));
+
+      const snap = identity.getSignalHistory()[0];
+
+      // Compute fitness ordering from attributions
+      const fitnesses = snap.attributions!.map(
+        (a) => DEFAULT_ARIL_CONFIG.fitnessDecay * snap.R * Math.abs(a)
+      );
+      const fBar = fitnesses.reduce((s, f) => s + f, 0) / fitnesses.length;
+
+      // Track how many dimensions actually trigger the directional assertion
+      let directionalChecks = 0;
+
+      for (let i = 0; i < 4; i++) {
+        const fitnessDiff = fitnesses[i] - fBar;
+        const replicator = snap.gradients!.replicator[i];
+
+        if (Math.abs(fitnessDiff) > 1e-10 && Math.abs(replicator) > 1e-15) {
+          // Same sign: both positive or both negative
+          expect(Math.sign(replicator)).toBe(Math.sign(fitnessDiff));
+          directionalChecks++;
+        }
+        // If fitnessDiff ≈ 0, replicator should be ≈ 0 too (no growth)
+        if (Math.abs(fitnessDiff) < 1e-10) {
+          expect(Math.abs(replicator)).toBeLessThan(1e-8);
+        }
+      }
+
+      // At least one dimension must have triggered the directional check.
+      // If this fails, the asymmetric weights didn't produce enough fitness
+      // divergence — the test is vacuously passing and needs a stronger setup.
+      expect(directionalChecks).toBeGreaterThanOrEqual(1);
     });
   });
 

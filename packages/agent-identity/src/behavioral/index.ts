@@ -271,6 +271,7 @@ export {
   type ARILState,
   type ARILUpdate,
   type SerializedARILState,
+  type SignalSnapshot,
 } from './ReplicatorOptimizer';
 
 export {

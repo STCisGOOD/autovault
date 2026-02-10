@@ -234,6 +234,13 @@ async function handlePush(options: SyncOptions): Promise<void> {
 
       pushSpinner.succeed('State pushed to blockchain');
 
+      // Domain profile publication (opt-in for privacy)
+      if (config.exposeDomainProfile) {
+        console.log(colors.secondary('  Domain profile: will be published'));
+      } else {
+        console.log(colors.muted('  Domain profile: local only (enable with exposeDomainProfile)'));
+      }
+
       console.log('');
       console.log(box(
         `${colors.success('Push Complete!')}
@@ -366,6 +373,23 @@ async function handlePull(options: SyncOptions): Promise<void> {
       info('Use --force to overwrite local state with on-chain state');
       console.log('');
       return;
+    }
+
+    // Verify on-chain state integrity before applying (RT audit finding #4).
+    // An RPC MITM could serve tampered account data. Validate weights are
+    // well-formed before overwriting local state.
+    const onChainWeights = onChain.state?.weights;
+    if (!Array.isArray(onChainWeights) || onChainWeights.length === 0) {
+      error('On-chain state has no weights — refusing to overwrite local state');
+      process.exit(1);
+    }
+    for (let i = 0; i < onChainWeights.length; i++) {
+      const w = onChainWeights[i];
+      if (typeof w !== 'number' || !Number.isFinite(w) || w < 0 || w > 1) {
+        error(`On-chain weight[${i}] = ${w} is invalid (expected finite number in [0, 1])`);
+        error('Possible RPC tampering — refusing to overwrite local state');
+        process.exit(1);
+      }
     }
 
     // Overwrite local state

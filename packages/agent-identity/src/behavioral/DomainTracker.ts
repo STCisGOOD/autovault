@@ -167,6 +167,42 @@ const DOMAIN_RULES: DomainRule[] = [
 ];
 
 // =============================================================================
+// IMPORT-BASED DOMAIN CLASSIFICATION
+// =============================================================================
+
+/** Import specifier prefix → domain mapping. First match wins (most-specific first). */
+const IMPORT_DOMAIN_MAP: ReadonlyArray<readonly [string, string]> = [
+  // Solana
+  ['@solana/', 'solana'],
+  ['@coral-xyz/anchor', 'solana'],
+  ['@project-serum/', 'solana'],
+  ['@metaplex-foundation/', 'solana'],
+
+  // React (before 'next' to avoid false matches)
+  ['react-dom', 'react'],
+  ['react-native', 'react'],
+  ['react', 'react'],
+  ['next/', 'react'],
+  ['next', 'react'],
+  ['@remix-run/', 'react'],
+
+  // DeFi / EVM
+  ['@uniswap/', 'defi'],
+  ['@aave/', 'defi'],
+  ['@openzeppelin/', 'defi'],
+  ['@ethersproject/', 'defi'],
+  ['ethers', 'defi'],
+  ['hardhat', 'defi'],
+  ['viem', 'defi'],
+  ['wagmi', 'defi'],
+  ['web3', 'defi'],
+
+  // TypeScript meta
+  ['typescript', 'typescript'],
+  ['ts-node', 'typescript'],
+] as const;
+
+// =============================================================================
 // TRACKER
 // =============================================================================
 
@@ -335,6 +371,85 @@ export class DomainTracker {
     }
 
     this.profile.specializations = specializations;
+  }
+
+  // ===========================================================================
+  // IMPORT-BASED DOMAIN CLASSIFICATION
+  // ===========================================================================
+
+  /**
+   * Classify import specifiers into domain hit counts.
+   * First prefix match wins — more-specific prefixes are listed first in
+   * IMPORT_DOMAIN_MAP so `@solana/web3.js` matches `@solana/` (→solana),
+   * not `web3` (→defi).
+   */
+  static classifyImports(imports: ReadonlySet<string>): Map<string, number> {
+    const hits = new Map<string, number>();
+    for (const spec of imports) {
+      for (const [prefix, domain] of IMPORT_DOMAIN_MAP) {
+        if (spec === prefix || spec.startsWith(prefix)) {
+          hits.set(domain, (hits.get(domain) ?? 0) + 1);
+          break;
+        }
+      }
+    }
+    return hits;
+  }
+
+  /**
+   * Update domain tracking from raw import specifiers of edited files.
+   *
+   * Spoofing resistance: contribution is `weight × (matchingFiles / totalFiles)`.
+   * A single planted file with solana imports among 10 edited react files
+   * contributes only 10% × weight, not the full session weight.
+   *
+   * @param rawImportCache - Map of filePath → Set<importSpecifier> (edited files only)
+   * @param R - Session outcome quality [-1, 1]
+   */
+  updateFromImports(
+    rawImportCache: ReadonlyMap<string, ReadonlySet<string>>,
+    R: number,
+  ): void {
+    if (rawImportCache.size === 0) return;
+
+    const now = Date.now();
+    const safeR = safeClamp(safeFinite(R, 0), -1, 1, 0);
+    const weight = Math.max(0.1, (safeR + 1) / 2);
+
+    // Aggregate: for each domain, count how many edited files had matching imports
+    const domainFileCount = new Map<string, number>();
+    for (const [, imports] of rawImportCache) {
+      const fileDomains = DomainTracker.classifyImports(imports);
+      for (const [domain] of fileDomains) {
+        domainFileCount.set(domain, (domainFileCount.get(domain) ?? 0) + 1);
+      }
+    }
+
+    const totalFiles = rawImportCache.size;
+    for (const [domain, fileCount] of domainFileCount) {
+      let exposure = this.profile.domains.get(domain);
+      if (!exposure) {
+        exposure = {
+          domain,
+          weightedSessionCount: 0,
+          rawSessionCount: 0,
+          toolPatterns: [],
+          filePatterns: [],
+          insightCount: 0,
+          firstSeen: now,
+          lastSeen: now,
+        };
+        this.profile.domains.set(domain, exposure);
+      }
+
+      // Scale by fraction of edited files matching this domain
+      exposure.weightedSessionCount += weight * (fileCount / totalFiles);
+      // rawSessionCount NOT incremented — import signal supplements, doesn't replace
+      exposure.lastSeen = now;
+    }
+
+    this.updatePrimaryDomain();
+    this.updateSpecializations();
   }
 
   /**

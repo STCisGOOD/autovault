@@ -46,6 +46,51 @@ let trajectoryWarningEmitted = false;
 /** Schema version pinned once at SessionStart (v2.2 fix #23). */
 let trajectorySchemaVersion = 1;
 
+/**
+ * Lazily initialize trajectory evaluator for the stateless hook model
+ * (each hook invocation is a separate Node.js process).
+ *
+ * Reconstructs evaluator state from existing SQLite snapshots (Tier 0 caches).
+ * Dep graph is loaded from SQLite cache (no dep-cruiser call). The debouncer
+ * is NOT reconstructed — in stateless mode, Tier 1 triggers run dep-cruiser
+ * inline in handleToolCall (with 2s timeout). In daemon mode, the debouncer
+ * from SessionStart persists and handles Tier 1 with proper batching.
+ */
+function ensureTrajectory(sessionId: string, cwd?: string): boolean {
+  if (trajectoryEvaluator && trajectoryStore) return true;
+
+  try {
+    const dbPath = path.join(getStorageDir(), 'trajectory.db');
+    if (!fs.existsSync(dbPath)) return false;
+
+    trajectoryStore = new TrajectoryStore({ dbPath });
+    trajectoryStore.initialize();
+    trajectorySchemaVersion = trajectoryStore.initSession();
+
+    const trajCwd = cwd || process.cwd();
+    trajectoryEvaluator = TrajectoryEvaluator.reconstructFromStore({
+      cwd: trajCwd,
+      sessionId,
+      store: trajectoryStore,
+    });
+
+    // Reconstruct dep graph from SQLite cache (sync — no dep-cruiser call).
+    // Previous PostToolUse processes may have persisted graph state via dep-cruiser.
+    // Loading it here enables isNewFile detection and Tier 1 coupling metrics.
+    trajectoryDepGraph = new DepGraphManager({ cwd: trajCwd, store: trajectoryStore });
+    if (trajectoryDepGraph.initializeFromCache()) {
+      trajectoryEvaluator.updateResolvedGraph(trajectoryDepGraph.asGraphRef());
+    }
+
+    return true;
+  } catch {
+    trajectoryEvaluator = null;
+    trajectoryStore = null;
+    trajectoryDepGraph = null;
+    return false;
+  }
+}
+
 // =============================================================================
 // TYPES
 // =============================================================================
@@ -195,6 +240,8 @@ async function handleSessionStart(sessionId: string, _input: HookInput): Promise
       const dbPath = path.join(getStorageDir(), 'trajectory.db');
       trajectoryStore = new TrajectoryStore({ dbPath });
       trajectoryStore.initialize();
+      // RT-M7: Restrict trajectory.db permissions to owner-only (Unix: 0o600)
+      try { fs.chmodSync(dbPath, 0o600); } catch { /* Windows ignores, Unix enforces */ }
       trajectorySchemaVersion = trajectoryStore.initSession();
 
       const trajCwd = _input.cwd || process.cwd();
@@ -206,22 +253,26 @@ async function handleSessionStart(sessionId: string, _input: HookInput): Promise
       trajectoryEvaluator.initialize();
       trajectoryWarningEmitted = false;
 
-      // Initialize Tier 1 pipeline: DepGraphManager + Tier1Debouncer
+      // Initialize Tier 1 pipeline: DepGraphManager + Tier1Debouncer.
+      //
+      // In the current stateless hook model, this process exits after SessionStart
+      // returns, so the debouncer dies with it. PostToolUse processes fall back to
+      // running dep-cruiser inline (see handleToolCall). The debouncer is kept here
+      // because it's the correct architecture for a persistent daemon mode — it
+      // provides batching efficiency and shouldCommit() staleness guards that the
+      // inline fallback lacks. When the daemon architecture arrives, this code
+      // becomes the primary Tier 1 path without any changes.
       trajectoryDepGraph = new DepGraphManager({ cwd: trajCwd, store: trajectoryStore });
       trajectoryDebouncer = new Tier1Debouncer(
         async (files: string[], meta: BatchMeta, shouldCommit: () => boolean) => {
           if (!trajectoryDepGraph || !trajectoryEvaluator || !trajectoryStore) return;
           try {
-            // Run dep-cruiser on the batch (optional — returns null if not installed)
             const result = await trajectoryDepGraph.runDepCruiser(files);
             if (!shouldCommit()) return; // superseded by newer batch
             if (result) {
               trajectoryDepGraph.updateFromResult(result);
             }
-            // Update evaluator's resolved graph for future isNewFile checks
             trajectoryEvaluator.updateResolvedGraph(trajectoryDepGraph.asGraphRef());
-            // Write per-file coupling metrics as Tier 1 snapshots.
-            // Typed via Tier1Metrics to prevent key mismatches with feature extractor.
             const perFileMetrics = files.map(f => {
               const m = trajectoryDepGraph!.computeMetrics(f);
               const metrics: Tier1Metrics = {
@@ -258,7 +309,19 @@ async function handleSessionStart(sessionId: string, _input: HookInput): Promise
 
       // Try to initialize graph from cache (non-blocking — OK if fails)
       trajectoryDepGraph.initializeGraph().catch(() => {});
+
+      // Close trajectory resources — this process exits after handleSessionStart
+      // returns, so singletons die anyway. Explicit close checkpoints the WAL
+      // so PostToolUse/SessionEnd processes see the schema via ensureTrajectory().
+      try { trajectoryStore.close(); } catch { /* ignore */ }
+      trajectoryEvaluator = null;
+      trajectoryStore = null;
+      trajectoryDepGraph = null;
+      trajectoryDebouncer = null;
     } catch {
+      if (trajectoryStore) {
+        try { trajectoryStore.close(); } catch { /* ignore */ }
+      }
       trajectoryEvaluator = null;
       trajectoryStore = null;
       trajectoryDepGraph = null;
@@ -408,6 +471,13 @@ async function handleToolCall(sessionId: string, input: HookInput): Promise<Hook
     // Content is extracted from the tool payload (already in memory) rather than
     // reading from disk, which avoids race conditions with buffered writes,
     // Windows AV latency on just-written files, and NotebookEdit cell semantics.
+    //
+    // Lazy-init: each hook invocation is a separate process, so singletons
+    // from SessionStart are gone. Reconstruct from SQLite on first use.
+    if (!trajectoryEvaluator &&
+        (input.tool_name === 'Write' || input.tool_name === 'Edit' || input.tool_name === 'NotebookEdit')) {
+      ensureTrajectory(validSessionId, input.cwd);
+    }
     if (trajectoryEvaluator &&
         (input.tool_name === 'Write' || input.tool_name === 'Edit' || input.tool_name === 'NotebookEdit')) {
       const args = input.tool_input as Record<string, unknown>;
@@ -419,9 +489,52 @@ async function handleToolCall(sessionId: string, input: HookInput): Promise<Hook
           const content = extractContentFromPayload(input.tool_name, args, filePath);
           if (content !== null) {
             const result = trajectoryEvaluator.onFileChange(filePath, content, input.tool_name);
-            // Feed Tier 1 triggers to debouncer for batched dep analysis
+            // Tier 1 triggering: two modes depending on architecture.
             if (result.tier1Trigger && trajectoryDebouncer) {
+              // Daemon mode: debouncer batches file edits and runs dep-cruiser
+              // once per batch (with shouldCommit staleness guard). This is the
+              // preferred path — better batching efficiency, fewer dep-cruiser
+              // invocations. Active when the process persists (future daemon).
               trajectoryDebouncer.add(filePath, result.snapshot.stepIndex);
+            } else if (result.tier1Trigger && trajectoryDepGraph && trajectoryStore) {
+              // Stateless fallback: each PostToolUse is a separate process, so the
+              // SessionStart debouncer is dead. Run dep-cruiser inline with a 2s
+              // timeout to avoid blocking the hook response (dep-cruiser can take
+              // 2-5s on large projects, and Claude Code waits for our JSON response).
+              // Tradeoff: no batching, no staleness guard, one dep-cruiser per trigger.
+              try {
+                const DEP_CRUISER_TIMEOUT_MS = 2000;
+                const depResult = await Promise.race([
+                  trajectoryDepGraph.runDepCruiser([filePath]),
+                  new Promise<null>(resolve => setTimeout(() => resolve(null), DEP_CRUISER_TIMEOUT_MS)),
+                ]);
+                if (depResult) {
+                  trajectoryDepGraph.updateFromResult(depResult);
+                }
+                trajectoryEvaluator.updateResolvedGraph(trajectoryDepGraph.asGraphRef());
+                const m = trajectoryDepGraph.computeMetrics(filePath);
+                const tier1Metrics: Tier1Metrics = {
+                  _tier1_ca: m.ca,
+                  _tier1_ce: m.ce,
+                  _tier1_instability: m.instability,
+                  _tier1_trigger_step_min: result.snapshot.stepIndex,
+                  _tier1_trigger_step_max: result.snapshot.stepIndex,
+                };
+                trajectoryStore.writeBatch([{
+                  sessionId: validSessionId,
+                  stepIndex: result.snapshot.stepIndex,
+                  timestampMs: Date.now(),
+                  filePath,
+                  toolType: 'tier1-batch',
+                  granularity: 'file' as const,
+                  packageName: null,
+                  fileRole: 'source' as const,
+                  metricsJson: tier1Metrics as unknown as Record<string, unknown>,
+                  tier: 1 as const,
+                  schemaVersion: trajectorySchemaVersion,
+                }]);
+                trajectoryDepGraph.persistGraph(validSessionId, result.snapshot.stepIndex);
+              } catch { /* Tier 1 failure is non-fatal */ }
             }
           }
         } catch {
@@ -431,6 +544,12 @@ async function handleToolCall(sessionId: string, input: HookInput): Promise<Hook
           }
         }
       }
+    }
+
+    // Flush trajectory data to SQLite before process exit.
+    // Each PostToolUse is a separate process — unflushed pending batches are lost.
+    if (trajectoryStore) {
+      try { trajectoryStore.flush(); } catch { /* non-fatal */ }
     }
 
     return { continue: true };
@@ -575,7 +694,7 @@ async function handleSessionEnd(sessionId: string, input: HookInput): Promise<Ho
     let arilSummary = '';
     try {
       // Dynamic import to avoid loading heavy identity package on every PostToolUse
-      const { createUnifiedIdentity } = await import('persistence-agent-identity');
+      const { createUnifiedIdentity, createFileSystemPrivateStorage } = await import('persistence-agent-identity');
 
       // 1. Storage backend — survives process restarts
       const stateDir = path.join(getStorageDir(), 'state');
@@ -583,7 +702,21 @@ async function handleSessionEnd(sessionId: string, input: HookInput): Promise<Ho
 
       // 2. Create identity (no auto-save timer — we save manually at the end)
       const identity = createUnifiedIdentity(storage, { autoSaveIntervalMs: 0 });
+
+      // 2.0. Wire private storage for ARIL state persistence.
+      // MUST be before initialize() so loadARILState() finds the backend.
+      if (config.did) {
+        identity.setPrivateStorage(
+          createFileSystemPrivateStorage({ agentDid: config.did })
+        );
+      }
+
       await identity.initialize([0.5, 0.5, 0.5, 0.5]);
+
+      // 2.1. Telemetry URL from config file (env vars not accepted — RT2-2)
+      if (config.telemetryUrl) {
+        identity.setTelemetryUrl(config.telemetryUrl);
+      }
 
       // 2.5. Silent reset guard — if state files exist but sessionCount=0,
       // deserialization may have failed and we'd learn on a blank slate.
@@ -653,9 +786,15 @@ async function handleSessionEnd(sessionId: string, input: HookInput): Promise<Ho
         });
       }
 
+      // Lazy-init trajectory for SessionEnd (separate process from SessionStart)
+      if (!trajectoryEvaluator || !trajectoryStore) {
+        ensureTrajectory(validSessionId, input.cwd);
+      }
+
       if (trajectoryEvaluator && trajectoryStore) {
         try {
-          // Drain any pending Tier 1 batch (≤2s within 15s budget)
+          // Drain any pending Tier 1 batch (≤2s within 15s budget).
+          // Only fires in daemon mode — in stateless mode, debouncer is null.
           if (trajectoryDebouncer) {
             await trajectoryDebouncer.flush(2000);
           }
@@ -687,6 +826,16 @@ async function handleSessionEnd(sessionId: string, input: HookInput): Promise<Ho
 
       if (extraSignals.length > 0) {
         identity.setExtraSignals(extraSignals);
+      }
+
+      // 5.8. Feed raw import cache for domain classification
+      if (trajectoryEvaluator) {
+        try {
+          const rawImportCache = trajectoryEvaluator.getRawImportCache();
+          if (rawImportCache.size > 0) {
+            identity.setImportCache(rawImportCache);
+          }
+        } catch { /* domain classification failure is non-fatal */ }
       }
 
       // 6. End observation → ARIL backward pass fires

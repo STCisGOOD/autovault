@@ -321,12 +321,17 @@ export class TrajectoryStore {
     let rows: unknown[];
 
     if (opts?.tier !== undefined && opts?.filePath) {
+      // RT-M5 fix: parameterize LIMIT to prevent SQL injection.
+      // SQLite LIMIT -1 = no limit (returns all rows).
+      const safeLimit = opts?.limit != null
+        ? Math.max(1, Math.floor(Number(opts.limit) || 0))
+        : -1;
       rows = this.db.prepare(`
         SELECT * FROM metric_snapshots
         WHERE session_id = ? AND tier = ? AND file_path = ?
         ORDER BY step_index
-        ${opts.limit ? `LIMIT ${opts.limit}` : ''}
-      `).all(sessionId, opts.tier, opts.filePath);
+        LIMIT ?
+      `).all(sessionId, opts.tier, opts.filePath, safeLimit);
     } else if (opts?.tier !== undefined) {
       rows = this.queryBySessionAndTierStmt.all(sessionId, opts.tier);
     } else if (opts?.filePath) {
@@ -446,6 +451,11 @@ export class TrajectoryStore {
       this.flush();
     } catch { /* ignore flush errors on close */ }
     try {
+      // RT-M6 fix: checkpoint WAL to prevent unbounded growth.
+      // TRUNCATE mode resets the WAL file to zero bytes after checkpoint.
+      this.db.pragma('wal_checkpoint(TRUNCATE)');
+    } catch { /* WAL checkpoint failure is non-fatal */ }
+    try {
       this.db.close();
     } catch { /* already closed */ }
   }
@@ -463,7 +473,7 @@ export class TrajectoryStore {
     `);
 
     this.queryBySessionStmt = this.db.prepare(`
-      SELECT * FROM metric_snapshots WHERE session_id = ? ORDER BY step_index
+      SELECT * FROM metric_snapshots WHERE session_id = ? ORDER BY step_index ASC
     `);
 
     this.queryBySessionAndTierStmt = this.db.prepare(`

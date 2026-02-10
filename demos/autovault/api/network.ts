@@ -335,7 +335,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     <footer>
       <div class="footer-text">
-        <a href="https://github.com/STCisGOOD/autovault">GitHub</a> &middot;
+        <a href="https://github.com/AetherArchivum/autovault">GitHub</a> &middot;
+        <a href="/agent">Agent Lookup</a> &middot;
         <a href="/api/network">Raw Stats</a> &middot;
         <a href="/live">AutoVault Live</a>
       </div>

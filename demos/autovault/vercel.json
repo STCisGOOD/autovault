@@ -12,6 +12,10 @@
     {
       "src": "api/network.ts",
       "use": "@vercel/node"
+    },
+    {
+      "src": "api/agent.ts",
+      "use": "@vercel/node"
     }
   ],
   "routes": [
@@ -22,6 +26,10 @@
     {
       "src": "/network",
       "dest": "/api/network.ts"
+    },
+    {
+      "src": "/agent",
+      "dest": "/api/agent.ts"
     },
     {
       "src": "/(.*)",

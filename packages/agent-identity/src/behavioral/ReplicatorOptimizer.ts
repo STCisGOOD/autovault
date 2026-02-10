@@ -67,6 +67,12 @@ export interface ARILConfig {
   mutationFloor?: number;
 }
 
+/** Minimum attribution history length before neuroplasticity activates.
+ *  Variance estimation needs >=3 data points to be meaningful.
+ *  Referenced by ARIL.test.ts ordering proof — if you change this,
+ *  the activation-boundary test must be updated. */
+export const MIN_NEUROPLASTICITY_SESSIONS = 3;
+
 export const DEFAULT_ARIL_CONFIG: ARILConfig = {
   alphaEnergy: 0.01,
   alphaOutcome: 0.05,
@@ -82,6 +88,50 @@ export const DEFAULT_ARIL_CONFIG: ARILConfig = {
   mutationFloor: 1e-6,
 };
 
+/** Per-session audit record. Phase 1 fields (signals→R) captured before backward
+ *  pass; Phase 2 fields (gradients, attributions, weights) enriched after.
+ *  Phase 2 fields are optional for backward compat with pre-v2.1 snapshots. */
+export interface SignalSnapshot {
+  /** Session index (pre-increment: captured before computeARILUpdate) */
+  sessionIndex: number;
+  /** Unix timestamp (ms) */
+  timestamp: number;
+  /** Aggregate outcome R ∈ [-1, 1] */
+  R: number;
+  /** Baseline-subtracted outcome (R - EMA baseline) */
+  R_adj: number;
+  /** Individual contributing signals */
+  signals: ReadonlyArray<{ source: string; value: number; weight: number }>;
+
+  // --- Phase 2: backward pass audit (optional, absent in pre-v2.1 snapshots) ---
+
+  /** Weights at session start (pre-bridge PDE evolution, pre-ARIL) */
+  weightsSessionStart?: number[];
+  /** Weights after bridge PDE evolution, before ARIL backward pass */
+  weightsBefore?: number[];
+  /** Weights after ARIL update */
+  weightsAfter?: number[];
+  /** Combined per-dimension Δw[i] */
+  deltaW?: number[];
+  /** Decomposed gradient components */
+  gradients?: {
+    energy: number[];
+    outcome: number[];
+    replicator: number[];
+  };
+  /** Blended Shapley attributions per dimension (post-Möbius) */
+  attributions?: number[];
+  /** Meta-learning rates active when update was computed (pre-mutation) */
+  metaLearningRates?: number[];
+  /** Fitness values after this session's EMA update */
+  fitness?: number[];
+  /** Möbius blend factor α ∈ [0, 1]. 0 = pure additive, 1 = pure Möbius. Absent pre-v2.2. */
+  blendAlpha?: number;
+  /** Möbius characteristic sum v_learned(N) - v_learned(∅). Present only when blendAlpha > 0.
+   *  Algebraic invariant: Σφ[i] = (1-blendAlpha)·R + blendAlpha·mobiusV */
+  mobiusV?: number;
+}
+
 export interface ARILState {
   /** f[i] — EMA of attributed outcomes per dimension */
   fitness: Float64Array;
@@ -91,6 +141,8 @@ export interface ARILState {
   recentAttributions: number[][];
   /** Number of sessions processed */
   sessionCount: number;
+  /** Per-session R decomposition (last 20 sessions). Enables "why did weights change?" queries. */
+  signalHistory: SignalSnapshot[];
 }
 
 export interface ARILUpdate {
@@ -128,6 +180,7 @@ export function createARILState(n: number): ARILState {
     metaLearningRates: new Float64Array(n).fill(1.0),
     recentAttributions: [],
     sessionCount: 0,
+    signalHistory: [],
   };
 }
 
@@ -328,7 +381,7 @@ export function computeARILUpdate(
   }
 
   // === 4. Neuroplasticity: adapt meta-learning rates ===
-  if (state.recentAttributions.length >= 3) {
+  if (state.recentAttributions.length >= MIN_NEUROPLASTICITY_SESSIONS) {
     for (let i = 0; i < n; i++) {
       // Compute variance of recent attributions for dimension i
       const values = state.recentAttributions.map(a => safeFinite(a[i], 0));
@@ -444,6 +497,8 @@ export interface SerializedARILState {
   metaLearningRates: number[];
   recentAttributions: number[][];
   sessionCount: number;
+  /** Per-session signal decomposition (added in v2). Missing = [] for backward compat. */
+  signalHistory?: SignalSnapshot[];
 }
 
 export function serializeARILState(state: ARILState): SerializedARILState {
@@ -452,21 +507,69 @@ export function serializeARILState(state: ARILState): SerializedARILState {
     metaLearningRates: Array.from(state.metaLearningRates),
     recentAttributions: state.recentAttributions,
     sessionCount: state.sessionCount,
+    signalHistory: state.signalHistory,
   };
 }
 
 export function deserializeARILState(data: SerializedARILState): ARILState {
+  // Validate signalHistory entries: reject malformed snapshots (RT-H8 pattern)
+  const rawHistory = Array.isArray(data.signalHistory) ? data.signalHistory : [];
+  const signalHistory: SignalSnapshot[] = [];
+  for (const snap of rawHistory) {
+    if (
+      snap &&
+      typeof snap.sessionIndex === 'number' && Number.isFinite(snap.sessionIndex) &&
+      typeof snap.timestamp === 'number' && Number.isFinite(snap.timestamp) &&
+      typeof snap.R === 'number' && Number.isFinite(snap.R) &&
+      typeof snap.R_adj === 'number' && Number.isFinite(snap.R_adj) &&
+      Array.isArray(snap.signals)
+    ) {
+      // Phase 2 fields: validate if present, strip if malformed (don't reject entire snapshot)
+      const cleaned: SignalSnapshot = {
+        sessionIndex: snap.sessionIndex,
+        timestamp: snap.timestamp,
+        R: snap.R,
+        R_adj: snap.R_adj,
+        signals: snap.signals,
+      };
+      if (isFiniteArray(snap.weightsSessionStart)) cleaned.weightsSessionStart = snap.weightsSessionStart;
+      if (isFiniteArray(snap.weightsBefore)) cleaned.weightsBefore = snap.weightsBefore;
+      if (isFiniteArray(snap.weightsAfter)) cleaned.weightsAfter = snap.weightsAfter;
+      if (isFiniteArray(snap.deltaW)) cleaned.deltaW = snap.deltaW;
+      if (isFiniteArray(snap.attributions)) cleaned.attributions = snap.attributions;
+      if (isFiniteArray(snap.metaLearningRates)) cleaned.metaLearningRates = snap.metaLearningRates;
+      if (isFiniteArray(snap.fitness)) cleaned.fitness = snap.fitness;
+      if (typeof snap.blendAlpha === 'number' && Number.isFinite(snap.blendAlpha)) cleaned.blendAlpha = snap.blendAlpha;
+      if (typeof snap.mobiusV === 'number' && Number.isFinite(snap.mobiusV)) cleaned.mobiusV = snap.mobiusV;
+      if (
+        snap.gradients &&
+        isFiniteArray(snap.gradients.energy) &&
+        isFiniteArray(snap.gradients.outcome) &&
+        isFiniteArray(snap.gradients.replicator)
+      ) {
+        cleaned.gradients = snap.gradients;
+      }
+      signalHistory.push(cleaned);
+    }
+  }
+
   return {
     fitness: sanitizeFloat64Array(Float64Array.from(data.fitness ?? [])),
     metaLearningRates: sanitizeFloat64Array(Float64Array.from(data.metaLearningRates ?? []), 1.0),
     recentAttributions: (data.recentAttributions ?? []).slice(-20),
     sessionCount: Math.max(0, Math.floor(data.sessionCount ?? 0)),
+    signalHistory: signalHistory.slice(-20),
   };
 }
 
 // =============================================================================
 // INTERNAL HELPERS
 // =============================================================================
+
+/** Validate that v is a non-empty array of finite numbers (for Phase 2 deserialization). */
+function isFiniteArray(v: unknown): v is number[] {
+  return Array.isArray(v) && v.length > 0 && v.every(x => typeof x === 'number' && Number.isFinite(x));
+}
 
 function generateExplanation(
   n: number,

@@ -18,27 +18,9 @@ When 50 agents run in your infrastructure, you can't tell them apart. You can't 
 
 Persistence Protocol gives AI agents **cryptographic identity** tied to **behavioral evolution** — all stored on Solana.
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    PERSISTENCE PROTOCOL                      │
-├──────────────────────────┬──────────────────────────────────┤
-│   CRYPTOGRAPHIC LAYER    │      BEHAVIORAL LAYER            │
-│   Ed25519 keypairs       │   N-dimensional weights          │
-│   DID:persistence:...    │   Agent-declared insights        │
-│   Anchor PDA storage     │   Heuristic evolution            │
-├──────────────────────────┴──────────────────────────────────┤
-│   ON-CHAIN (Solana Devnet — Anchor Program)                  │
-│   • PDA-based identity accounts                              │
-│   • Declaration chains with Ed25519 signatures               │
-│   • Behavioral weight snapshots                              │
-│   • Continuity proofs across sessions                        │
-├─────────────────────────────────────────────────────────────┤
-│   OFF-CHAIN (Private, Local)                                 │
-│   • Session recordings & tool call logs                      │
-│   • Insight reasoning & decision context                     │
-│   • Hash commitments stored on-chain for verifiability       │
-└─────────────────────────────────────────────────────────────┘
-```
+<p align="center">
+  <img src="./docs/diagrams/architecture.svg" alt="Architecture diagram" width="600">
+</p>
 
 **Key insight:** Agents should participate in their own identity formation. Not just be observed — but actively declare what they learn.
 
@@ -213,6 +195,7 @@ Status: Live
 ## Documentation
 
 Detailed documentation is in [`docs/`](./docs/):
+- [**How Identity Works**](./docs/HOW-IDENTITY-WORKS.md) — What "an agent" is, session lifecycle, identity scope, data privacy
 - [Persistence Algorithm](./docs/PERSISTENCE_ALGORITHM.md) — The math behind behavioral evolution
 - [SEED Specification](./docs/SEED.md) — Portable identity format
 - [Behavioral Weights](./docs/WEIGHTS.md) — How dimensions are calculated

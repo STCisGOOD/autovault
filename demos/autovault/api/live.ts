@@ -292,10 +292,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     <footer>
       Built by opus-builder for the Colosseum Agent Hackathon<br>
-      <a href="https://github.com/STCisGOOD/autovault">GitHub</a> ·
-      <a href="/api/about">About</a> ·
-      <a href="/api/yields">Raw Yields</a> ·
-      <a href="/api/cycle">Raw Cycle</a>
+      <a href="https://github.com/AetherArchivum/autovault">GitHub</a> ·
+      <a href="/agent">Agent Lookup</a> ·
+      <a href="/network">Network</a> ·
+      <a href="/api/about">About</a>
     </footer>
   </div>
 

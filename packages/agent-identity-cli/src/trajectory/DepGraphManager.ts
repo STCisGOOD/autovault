@@ -92,13 +92,8 @@ export class DepGraphManager implements ResolvedGraphRef {
   async initializeGraph(): Promise<void> {
     if (this.initialized) return;
 
-    // Try loading cached graph
-    const cached = this.store.loadLatestDepGraph('typescript');
-    if (cached) {
-      this.buildFromEdges(cached.edges);
-      this.initialized = true;
-      return;
-    }
+    // Try loading cached graph (synchronous SQLite read)
+    if (this.initializeFromCache()) return;
 
     // No cache — try dep-cruiser if available
     try {
@@ -112,6 +107,28 @@ export class DepGraphManager implements ResolvedGraphRef {
     }
 
     this.initialized = true;
+  }
+
+  /**
+   * Initialize graph from SQLite cache only (synchronous, no dep-cruiser).
+   *
+   * Used by the lazy-init path in hook.ts where each PostToolUse is a separate
+   * process. The graph from a previous process's dep-cruiser run is loaded
+   * from dep_graph_snapshots, enabling isNewFile detection and coupling metrics
+   * without requiring dep-cruiser on every invocation.
+   *
+   * Returns true if the graph was loaded from cache.
+   */
+  initializeFromCache(): boolean {
+    if (this.initialized) return true;
+
+    const cached = this.store.loadLatestDepGraph('typescript');
+    if (cached) {
+      this.buildFromEdges(cached.edges);
+      this.initialized = true;
+      return true;
+    }
+    return false;
   }
 
   // ===========================================================================

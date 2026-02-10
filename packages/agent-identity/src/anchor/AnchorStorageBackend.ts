@@ -18,6 +18,8 @@ import {
   TransactionInstruction,
   SystemProgram,
   LAMPORTS_PER_SOL,
+  Ed25519Program,
+  SYSVAR_INSTRUCTIONS_PUBKEY,
 } from '@solana/web3.js';
 import { sha256 } from '@noble/hashes/sha256';
 import { bytesToHex, hexToBytes } from '@noble/hashes/utils';
@@ -67,6 +69,11 @@ export const MAX_DIMENSIONS = 16;
  * Reduced from 32 to 4 to fit within account size limits.
  */
 export const MAX_STORED_DECLARATIONS = 4;
+
+/**
+ * Maximum length of a dimension name in bytes (must match lib.rs).
+ */
+export const MAX_DIMENSION_NAME_LEN = 16;
 
 /**
  * Weight scaling factor (0.5 = 5000, 1.0 = 10000).
@@ -290,9 +297,34 @@ export class AnchorStorageBackend {
     // Add new declarations
     const newDeclarations = self.declarations.slice(existingCount);
 
+    // Track the current on-chain hash for Ed25519 message construction.
+    // Each declaration updates the hash, so we need the latest for each one.
+    let currentHash: Uint8Array = currentResult.found && currentResult.self
+      ? new Uint8Array(
+          currentResult.self.continuityProof?.currentHash
+            ? hexToBytes(currentResult.self.continuityProof.currentHash)
+            : new Uint8Array(32)
+        )
+      : new Uint8Array(32);
+
     for (const decl of newDeclarations) {
-      const ix = this.buildDeclareInstruction(pda, decl);
-      const tx = new Transaction().add(ix);
+      // Extract signature bytes for the Ed25519 precompile instruction
+      let sigBytes: Uint8Array;
+      if (decl.signature.startsWith('ed25519:')) {
+        sigBytes = hexToBytes(decl.signature.slice('ed25519:'.length));
+      } else if (decl.signature.startsWith('hash:')) {
+        const hashBytes = hexToBytes(decl.signature.slice('hash:'.length));
+        sigBytes = new Uint8Array(64);
+        sigBytes.set(hashBytes);
+      } else {
+        sigBytes = new Uint8Array(64);
+      }
+
+      // RT-C2 fix: Build Ed25519 precompile instruction (must be BEFORE declare)
+      const ed25519Ix = this.buildEd25519Instruction(decl, sigBytes, currentHash);
+      const declareIx = this.buildDeclareInstruction(pda, decl);
+
+      const tx = new Transaction().add(ed25519Ix).add(declareIx);
       tx.feePayer = this.payer.publicKey;
       tx.recentBlockhash = (await this.connection.getLatestBlockhash()).blockhash;
 
@@ -304,6 +336,16 @@ export class AnchorStorageBackend {
       if (this.debug) {
         console.log(`[AnchorStorage] Declaration recorded: ${sig}`);
       }
+
+      // Update currentHash for next declaration (compute the new hash).
+      // This matches compute_declaration_hash in the Rust program.
+      const declHash = sha256(Buffer.concat([
+        Buffer.from([decl.index]),
+        this.serializeU64(Math.round(decl.value * WEIGHT_SCALE)),
+        Buffer.from(sha256(Buffer.from(decl.content))), // content_hash
+        Buffer.from(currentHash),                         // previous_hash
+      ]));
+      currentHash = new Uint8Array(declHash);
     }
 
     // Record pivotal experiences
@@ -371,7 +413,7 @@ export class AnchorStorageBackend {
     // Serialize instruction data
     const data = Buffer.concat([
       Buffer.from(discriminator),
-      this.serializeVec(dimensionNames.map(n => Buffer.from(n))),
+      this.serializeVec(dimensionNames.map(n => this.serializeString(n))),
       this.serializeVec(initialWeights.map(w => this.serializeU64(w))),
       Buffer.from(vocabularyHash),
     ]);
@@ -389,6 +431,11 @@ export class AnchorStorageBackend {
 
   /**
    * Build the declare instruction.
+   *
+   * RT-H5 fix: content serialized as Borsh String (4-byte LE length + UTF-8),
+   * not as a raw content hash. The on-chain program computes the hash itself.
+   *
+   * RT-C2 fix: account keys include Instructions sysvar for Ed25519 verification.
    */
   private buildDeclareInstruction(
     pda: PublicKey,
@@ -409,24 +456,69 @@ export class AnchorStorageBackend {
       sigBytes = new Uint8Array(64);
     }
 
-    // Hash the content for on-chain storage (content_hash: [u8; 32])
-    const contentHash = sha256(Buffer.from(declaration.content));
+    // RT-H5 fix: Send content as Borsh String (4-byte LE length + UTF-8 bytes).
+    // The on-chain program receives this as `content: String` and computes
+    // content_hash itself via compute_content_hash(&content).
+    const contentBytes = Buffer.from(declaration.content, 'utf8');
+    const contentLen = Buffer.alloc(4);
+    contentLen.writeUInt32LE(contentBytes.length, 0);
 
     const data = Buffer.concat([
       Buffer.from(discriminator),
-      Buffer.from([declaration.index]),
-      this.serializeU64(Math.round(declaration.value * WEIGHT_SCALE)),
-      Buffer.from(contentHash),
-      Buffer.from(sigBytes),
+      Buffer.from([declaration.index]),                    // dimension_index: u8
+      this.serializeU64(Math.round(declaration.value * WEIGHT_SCALE)), // new_value: u64
+      contentLen,                                          // content length prefix (Borsh String)
+      contentBytes,                                        // content UTF-8 bytes
+      Buffer.from(sigBytes),                               // signature: [u8; 64]
     ]);
 
+    // RT-C2 fix: Include Instructions sysvar for Ed25519 signature verification.
+    // The Declare context expects 3 accounts: identity, authority, instructions.
     return new TransactionInstruction({
       keys: [
         { pubkey: pda, isSigner: false, isWritable: true },
         { pubkey: this.payer.publicKey, isSigner: true, isWritable: false },
+        { pubkey: SYSVAR_INSTRUCTIONS_PUBKEY, isSigner: false, isWritable: false },
       ],
       programId: this.programId,
       data,
+    });
+  }
+
+  /**
+   * Build the Ed25519 precompile instruction for declaration signing.
+   *
+   * RT-C2 fix: The on-chain program's verify_ed25519_signature checks that
+   * an Ed25519 precompile instruction exists earlier in the transaction with
+   * matching pubkey, message, and signature data.
+   *
+   * The message format matches build_declaration_message in lib.rs:
+   *   authority_pubkey (32) + dimension_index (1) + new_value_le (8) + content_bytes + prev_hash (32)
+   */
+  private buildEd25519Instruction(
+    declaration: Declaration,
+    sigBytes: Uint8Array,
+    prevHash: Uint8Array,
+  ): TransactionInstruction {
+    // Build the same message as the Rust program's build_declaration_message
+    const newValueBuf = Buffer.alloc(8);
+    const scaledValue = Math.round(declaration.value * WEIGHT_SCALE);
+    // Write as LE u64
+    newValueBuf.writeUInt32LE(scaledValue & 0xFFFFFFFF, 0);
+    newValueBuf.writeUInt32LE(Math.floor(scaledValue / 0x100000000) & 0xFFFFFFFF, 4);
+
+    const message = Buffer.concat([
+      this.payer.publicKey.toBuffer(),           // authority (32 bytes)
+      Buffer.from([declaration.index]),           // dimension_index (1 byte)
+      newValueBuf,                                // new_value LE (8 bytes)
+      Buffer.from(declaration.content, 'utf8'),   // content bytes
+      Buffer.from(prevHash),                      // prev_hash (32 bytes)
+    ]);
+
+    return Ed25519Program.createInstructionWithPublicKey({
+      publicKey: this.payer.publicKey.toBytes(),
+      message,
+      signature: sigBytes,
     });
   }
 
@@ -459,40 +551,33 @@ export class AnchorStorageBackend {
   }
 
   /**
-   * Build the evolve instruction — update on-chain weights with ARIL delta.
-   * Sends new weights and a timestamp for the evolution step.
+   * Build the evolve instruction from weight deltas.
+   *
+   * The on-chain program computes: delta = signal * time_step / 10000.
+   * With time_step = WEIGHT_SCALE (10000), the division is a no-op
+   * and signal values are applied as direct deltas to on-chain weights.
+   *
+   * Self-model tracking also works correctly at time_step=10000:
+   *   dm = 3000 * (w - m) * 10000 / (10000 * 10000) = 0.3 * (w - m)
    */
   buildEvolveInstruction(
     pda: PublicKey,
-    newWeights: number[],
-    fitness?: number[]
+    weightDeltas: number[],
   ): TransactionInstruction {
     const discriminator = sha256(Buffer.from('global:evolve')).slice(0, 8);
 
-    // Serialize weights as Vec<i64> (signed, scaled)
-    const weightBuffers = newWeights.map(w => {
+    // Serialize deltas as Vec<i64> (signed, already in scaled units)
+    const deltaBuffers = weightDeltas.map(d => {
       const buf = Buffer.alloc(8);
-      buf.writeBigInt64LE(BigInt(Math.round(w * WEIGHT_SCALE)));
+      buf.writeBigInt64LE(BigInt(d));
       return buf;
     });
 
-    const parts: Buffer[] = [
+    const data = Buffer.concat([
       Buffer.from(discriminator),
-      this.serializeVec(weightBuffers),
-      this.serializeU64(Date.now()),
-    ];
-
-    // Optional: append fitness scores if provided
-    if (fitness && fitness.length > 0) {
-      const fitnessBuffers = fitness.map(f => {
-        const buf = Buffer.alloc(8);
-        buf.writeBigInt64LE(BigInt(Math.round(f * WEIGHT_SCALE)));
-        return buf;
-      });
-      parts.push(this.serializeVec(fitnessBuffers));
-    }
-
-    const data = Buffer.concat(parts);
+      this.serializeVec(deltaBuffers),
+      this.serializeU64(WEIGHT_SCALE), // time_step = 10000 makes /10000 a no-op
+    ]);
 
     return new TransactionInstruction({
       keys: [
@@ -502,6 +587,90 @@ export class AnchorStorageBackend {
       programId: this.programId,
       data,
     });
+  }
+
+  /**
+   * Build the set_weights instruction for direct weight overwrite.
+   *
+   * Unlike evolve (PDE integrator), this sets absolute values.
+   * Weights are already in scaled units (0-10000).
+   */
+  buildSetWeightsInstruction(
+    pda: PublicKey,
+    scaledWeights: number[],
+  ): TransactionInstruction {
+    const discriminator = sha256(Buffer.from('global:set_weights')).slice(0, 8);
+
+    // Serialize as Vec<u64>
+    const weightBuffers = scaledWeights.map(w => this.serializeU64(w));
+
+    const data = Buffer.concat([
+      Buffer.from(discriminator),
+      this.serializeVec(weightBuffers),
+    ]);
+
+    return new TransactionInstruction({
+      keys: [
+        { pubkey: pda, isSigner: false, isWritable: true },
+        { pubkey: this.payer.publicKey, isSigner: true, isWritable: false },
+      ],
+      programId: this.programId,
+      data,
+    });
+  }
+
+  /**
+   * Set on-chain weights to exact target values.
+   *
+   * Takes float weights (0.0 - 1.0), scales to on-chain units (0 - 10000),
+   * and sends a set_weights instruction that directly overwrites.
+   * Self-model is also set to match (coherent: m = w).
+   *
+   * **EMA reset warning**: This erases the self-model's exponential moving
+   * average history. Use for initialization or recovery only. For routine
+   * per-session sync, use `evolve()` which preserves the EMA relationship.
+   */
+  async setWeights(targetWeights: number[]): Promise<string> {
+    const [pda] = await this.getIdentityPDA();
+
+    // Validate identity exists
+    const result = await this.load();
+    if (!result.found || !result.self) {
+      throw new Error('Cannot set weights: no identity account found on-chain');
+    }
+
+    const expectedCount = result.self.currentState.w.length;
+    if (targetWeights.length !== expectedCount) {
+      throw new Error(
+        `Weight count mismatch: target=${targetWeights.length}, on-chain=${expectedCount}`
+      );
+    }
+
+    // Scale to on-chain units and validate range
+    const scaledWeights = targetWeights.map(w => {
+      const scaled = Math.round(w * WEIGHT_SCALE);
+      if (scaled < 0 || scaled > 10000) {
+        throw new Error(`Weight out of range: ${w} (must be 0.0-1.0)`);
+      }
+      return scaled;
+    });
+
+    const ix = this.buildSetWeightsInstruction(pda, scaledWeights);
+
+    const tx = new Transaction().add(ix);
+    tx.feePayer = this.payer.publicKey;
+    tx.recentBlockhash = (await this.connection.getLatestBlockhash()).blockhash;
+
+    tx.sign(this.payer);
+
+    const sig = await this.connection.sendRawTransaction(tx.serialize());
+    await this.connection.confirmTransaction(sig, 'confirmed');
+
+    if (this.debug) {
+      console.log(`[AnchorStorage] Set weights directly: ${sig}`);
+    }
+
+    return sig;
   }
 
   /**
@@ -533,11 +702,48 @@ export class AnchorStorageBackend {
   }
 
   /**
-   * Evolve weights on-chain using ARIL update.
+   * Evolve on-chain weights toward target values.
+   *
+   * IMPORTANT: The on-chain `evolve` instruction is a PDE integrator designed for
+   * gradual weight drift: `new_weight = old + signal * time_step / 10000`. This
+   * method abuses it as a direct setter via a mathematical trick:
+   *
+   *   signal = (target - current) * WEIGHT_SCALE    // delta in scaled units
+   *   time_step = WEIGHT_SCALE (10000)              // makes /10000 a no-op
+   *   → new_weight = old + (target - old) = target  // exact overwrite
+   *
+   * This works but is semantically misleading. Any third-party client reading the
+   * Rust source will expect `evolve` to apply small gradual updates, not absolute
+   * overwrites. Prefer `setWeights()` once the set_weights instruction is deployed.
+   *
+   * Loads current on-chain weights, computes deltas, and sends them as
+   * experience_signal with time_step=WEIGHT_SCALE.
    */
-  async evolve(newWeights: number[], fitness?: number[]): Promise<string> {
+  async evolve(targetWeights: number[]): Promise<string> {
     const [pda] = await this.getIdentityPDA();
-    const ix = this.buildEvolveInstruction(pda, newWeights, fitness);
+
+    // Load current on-chain state to compute deltas
+    const result = await this.load();
+    if (!result.found || !result.self) {
+      throw new Error('Cannot evolve: no identity account found on-chain');
+    }
+
+    const currentWeights = Array.from(result.self.currentState.w);
+    if (targetWeights.length !== currentWeights.length) {
+      throw new Error(`Weight count mismatch: target=${targetWeights.length}, on-chain=${currentWeights.length}`);
+    }
+
+    // Compute deltas in scaled units: (target - current) * WEIGHT_SCALE
+    // These become the experience_signal values sent to the Rust program
+    const deltas = targetWeights.map((target, i) =>
+      Math.round((target - currentWeights[i]) * WEIGHT_SCALE)
+    );
+
+    if (this.debug) {
+      console.log(`[AnchorStorage] Evolve deltas: ${deltas.map(d => d / WEIGHT_SCALE)}`);
+    }
+
+    const ix = this.buildEvolveInstruction(pda, deltas);
 
     const tx = new Transaction().add(ix);
     tx.feePayer = this.payer.publicKey;
@@ -627,16 +833,18 @@ export class AnchorStorageBackend {
     const vocabularyHash = new Uint8Array(data.slice(offset, offset + 32));
     offset += 32;
 
-    // Dimension names (MAX_DIMENSIONS * 32 bytes)
+    // Dimension names (MAX_DIMENSIONS * MAX_DIMENSION_NAME_LEN bytes)
+    // RT-M11 fix: Rust uses MAX_DIMENSION_NAME_LEN=16 bytes per name, not 32.
+    // Reading 32 bytes per name shifted all subsequent field offsets by 256 bytes.
     const dimensionNames: string[] = [];
     for (let i = 0; i < MAX_DIMENSIONS; i++) {
-      const nameBytes = data.slice(offset, offset + 32);
+      const nameBytes = data.slice(offset, offset + MAX_DIMENSION_NAME_LEN);
       const nullIdx = nameBytes.indexOf(0);
-      const name = nameBytes.slice(0, nullIdx === -1 ? 32 : nullIdx).toString('utf8');
+      const name = nameBytes.slice(0, nullIdx === -1 ? MAX_DIMENSION_NAME_LEN : nullIdx).toString('utf8');
       if (i < dimensionCount) {
         dimensionNames.push(name);
       }
-      offset += 32;
+      offset += MAX_DIMENSION_NAME_LEN;
     }
 
     // Weights (MAX_DIMENSIONS * 8 bytes)

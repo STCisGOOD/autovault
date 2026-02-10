@@ -229,9 +229,14 @@ export function extractTestSignal(actionLog: ActionLog): OutcomeSignal {
   const bashResults: string[] = [];
 
   for (const tc of toolCalls) {
-    // Only scan Bash tool calls (where test commands run)
+    // Only scan Bash tool calls that are actually test commands (RT-H7 fix).
+    // Without this gate, ANY Bash output matching test patterns
+    // (e.g. `echo "Tests: 999 passed"`) would inflate the test signal.
     if (tc.tool === 'Bash' && typeof tc.result === 'string') {
-      bashResults.push(tc.result);
+      const args = (tc.args && typeof tc.args === 'object') ? tc.args as Record<string, unknown> : {};
+      if (isTestCommand(args, DEFAULT_STRATEGY_FEATURE_CONFIG.testPatterns)) {
+        bashResults.push(tc.result);
+      }
     }
   }
 

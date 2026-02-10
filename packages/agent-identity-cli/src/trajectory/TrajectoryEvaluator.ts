@@ -98,6 +98,61 @@ export class TrajectoryEvaluator {
   }
 
   /**
+   * Reconstruct evaluator state from existing snapshots in the store.
+   *
+   * Each hook invocation is a separate Node.js process, so module-level
+   * singletons initialized at SessionStart are gone by PostToolUse/SessionEnd.
+   * This factory method rebuilds in-memory caches from SQLite, allowing the
+   * evaluator to resume mid-session without data loss.
+   *
+   * Recovers: seenPaths, currentStep, rawImportCache, exportCountCache, lineCountCache.
+   * Does NOT recover: contentHashCache (worst case: one extra re-parse per file).
+   * Does NOT recover: resolvedGraph (Tier 1 pipeline requires persistent state).
+   */
+  static reconstructFromStore(config: TrajectoryEvaluatorConfig): TrajectoryEvaluator {
+    const evaluator = new TrajectoryEvaluator(config);
+    // NOTE: initSession() is NOT called here. The caller (ensureTrajectory) must
+    // call store.initSession() before invoking this method. The store's pinned
+    // schema version is used for all writes; the evaluator's copy is cosmetic
+    // (overridden by the store in writeBatch).
+
+    // Query all snapshots for this session, ordered by step_index ASC.
+    // ORDERING DEPENDENCY: reconstructFromStore relies on ascending order so that
+    // the last snapshot per file (latest edit) wins when overwriting cache entries.
+    // This is guaranteed by queryBySession's ORDER BY step_index ASC clause.
+    const snapshots = config.store.queryBySession(config.sessionId);
+
+    let maxStep = -1;
+    for (const snap of snapshots) {
+      evaluator.seenPaths.add(snap.filePath);
+      if (snap.stepIndex > maxStep) maxStep = snap.stepIndex;
+
+      // Only Tier 0 has per-file AST caches we need to reconstruct.
+      // Snapshots are ordered by step_index, so last write per file wins.
+      if (snap.tier === 0) {
+        const metrics = snap.metricsJson;
+
+        if (Array.isArray(metrics.raw_imports)) {
+          evaluator.rawImportCache.set(
+            snap.filePath,
+            new Set(metrics.raw_imports as string[]),
+          );
+        }
+        if (typeof metrics.export_count === 'number') {
+          evaluator.exportCountCache.set(snap.filePath, metrics.export_count);
+        }
+        if (typeof metrics.line_count === 'number') {
+          evaluator.lineCountCache.set(snap.filePath, metrics.line_count);
+        }
+      }
+    }
+
+    evaluator.currentStep = maxStep + 1;
+
+    return evaluator;
+  }
+
+  /**
    * Called on every Write/Edit/NotebookEdit.
    *
    * v2.2 critical ordering:

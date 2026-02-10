@@ -280,6 +280,203 @@ describe('TrajectoryEvaluator', () => {
   });
 });
 
+describe('reconstructFromStore', () => {
+  it('rebuilds seenPaths from existing snapshots', () => {
+    const dbPath = makeTmpDbPath();
+    const store = new TrajectoryStore({ dbPath });
+    store.initialize();
+
+    // Create evaluator, write some snapshots, then close
+    const eval1 = new TrajectoryEvaluator({ cwd: '/project', sessionId: 'sess-1', store });
+    eval1.initialize();
+    eval1.onFileChange('/src/a.ts', 'const a = 1;', 'Write');
+    eval1.onFileChange('/src/b.ts', 'const b = 2;', 'Write');
+    eval1.shutdown();
+    store.close();
+
+    // Reconstruct from a fresh store (simulates new process)
+    const store2 = new TrajectoryStore({ dbPath });
+    store2.initialize();
+    const eval2 = TrajectoryEvaluator.reconstructFromStore({
+      cwd: '/project', sessionId: 'sess-1', store: store2,
+    });
+
+    expect(eval2.getSeenPaths().size).toBe(2);
+    expect(eval2.getSeenPaths().has('/src/a.ts')).toBe(true);
+    expect(eval2.getSeenPaths().has('/src/b.ts')).toBe(true);
+
+    store2.close();
+    try { fs.unlinkSync(dbPath); } catch { /* ignore */ }
+    try { fs.rmdirSync(path.dirname(dbPath)); } catch { /* ignore */ }
+  });
+
+  it('rebuilds currentStep correctly', () => {
+    const dbPath = makeTmpDbPath();
+    const store = new TrajectoryStore({ dbPath });
+    store.initialize();
+
+    const eval1 = new TrajectoryEvaluator({ cwd: '/project', sessionId: 'sess-1', store });
+    eval1.initialize();
+    eval1.onFileChange('/src/a.ts', 'const a = 1;', 'Write'); // step 0
+    eval1.onFileChange('/src/b.ts', 'const b = 2;', 'Write'); // step 1
+    eval1.onFileChange('/src/c.ts', 'const c = 3;', 'Write'); // step 2
+    eval1.shutdown();
+    store.close();
+
+    const store2 = new TrajectoryStore({ dbPath });
+    store2.initialize();
+    const eval2 = TrajectoryEvaluator.reconstructFromStore({
+      cwd: '/project', sessionId: 'sess-1', store: store2,
+    });
+
+    // Next step should be 3
+    expect(eval2.getCurrentStep()).toBe(3);
+
+    // New file change should get step 3
+    const r = eval2.onFileChange('/src/d.ts', 'const d = 4;', 'Write');
+    expect(r.snapshot.stepIndex).toBe(3);
+
+    store2.close();
+    try { fs.unlinkSync(dbPath); } catch { /* ignore */ }
+    try { fs.rmdirSync(path.dirname(dbPath)); } catch { /* ignore */ }
+  });
+
+  it('rebuilds rawImportCache for import delta detection', () => {
+    const dbPath = makeTmpDbPath();
+    const store = new TrajectoryStore({ dbPath });
+    store.initialize();
+
+    const content1 = `import { foo } from './utils';\nconst x = 1;`;
+    const eval1 = new TrajectoryEvaluator({ cwd: '/project', sessionId: 'sess-1', store });
+    eval1.initialize();
+    eval1.onFileChange('/src/a.ts', content1, 'Write');
+    eval1.shutdown();
+    store.close();
+
+    // Reconstruct
+    const store2 = new TrajectoryStore({ dbPath });
+    store2.initialize();
+    const eval2 = TrajectoryEvaluator.reconstructFromStore({
+      cwd: '/project', sessionId: 'sess-1', store: store2,
+    });
+
+    // Import cache should be populated
+    const importCache = eval2.getRawImportCache();
+    expect(importCache.get('/src/a.ts')).toEqual(new Set(['./utils']));
+
+    // Modifying imports should trigger Tier 1
+    const content2 = `import { foo } from './utils';\nimport { bar } from 'lodash';\nconst x = 1;`;
+    const r = eval2.onFileChange('/src/a.ts', content2, 'Edit');
+    expect(r.tier1Trigger).toBe(true);
+
+    store2.close();
+    try { fs.unlinkSync(dbPath); } catch { /* ignore */ }
+    try { fs.rmdirSync(path.dirname(dbPath)); } catch { /* ignore */ }
+  });
+
+  it('rebuilds lineCountCache for loc_delta', () => {
+    const dbPath = makeTmpDbPath();
+    const store = new TrajectoryStore({ dbPath });
+    store.initialize();
+
+    const eval1 = new TrajectoryEvaluator({ cwd: '/project', sessionId: 'sess-1', store });
+    eval1.initialize();
+    eval1.onFileChange('/src/a.ts', 'const a = 1;', 'Write'); // 1 line
+    eval1.shutdown();
+    store.close();
+
+    const store2 = new TrajectoryStore({ dbPath });
+    store2.initialize();
+    const eval2 = TrajectoryEvaluator.reconstructFromStore({
+      cwd: '/project', sessionId: 'sess-1', store: store2,
+    });
+
+    // Add 2 more lines → delta should be +2
+    const r = eval2.onFileChange('/src/a.ts', 'const a = 1;\nconst b = 2;\nconst c = 3;', 'Edit');
+    expect(r.snapshot.metricsJson.loc_delta).toBe(2);
+
+    store2.close();
+    try { fs.unlinkSync(dbPath); } catch { /* ignore */ }
+    try { fs.rmdirSync(path.dirname(dbPath)); } catch { /* ignore */ }
+  });
+
+  it('rebuilds exportCountCache for api surface tracking', () => {
+    const dbPath = makeTmpDbPath();
+    const store = new TrajectoryStore({ dbPath });
+    store.initialize();
+
+    const eval1 = new TrajectoryEvaluator({ cwd: '/project', sessionId: 'sess-1', store });
+    eval1.initialize();
+    eval1.onFileChange('/src/a.ts', 'export const a = 1;\nexport const b = 2;', 'Write');
+    eval1.shutdown();
+    store.close();
+
+    const store2 = new TrajectoryStore({ dbPath });
+    store2.initialize();
+    const eval2 = TrajectoryEvaluator.reconstructFromStore({
+      cwd: '/project', sessionId: 'sess-1', store: store2,
+    });
+
+    expect(eval2.getExportCountCache().get('/src/a.ts')).toBe(2);
+
+    store2.close();
+    try { fs.unlinkSync(dbPath); } catch { /* ignore */ }
+    try { fs.rmdirSync(path.dirname(dbPath)); } catch { /* ignore */ }
+  });
+
+  it('handles empty session (no prior snapshots)', () => {
+    const dbPath = makeTmpDbPath();
+    const store = new TrajectoryStore({ dbPath });
+    store.initialize();
+    store.initSession();
+
+    const eval2 = TrajectoryEvaluator.reconstructFromStore({
+      cwd: '/project', sessionId: 'sess-1', store,
+    });
+
+    expect(eval2.getCurrentStep()).toBe(0);
+    expect(eval2.getSeenPaths().size).toBe(0);
+    expect(eval2.getRawImportCache().size).toBe(0);
+
+    // Should work normally for new file changes
+    const r = eval2.onFileChange('/src/a.ts', 'const x = 1;', 'Write');
+    expect(r.snapshot.stepIndex).toBe(0);
+
+    store.close();
+    try { fs.unlinkSync(dbPath); } catch { /* ignore */ }
+    try { fs.rmdirSync(path.dirname(dbPath)); } catch { /* ignore */ }
+  });
+
+  it('uses latest snapshot per file (multiple edits)', () => {
+    const dbPath = makeTmpDbPath();
+    const store = new TrajectoryStore({ dbPath });
+    store.initialize();
+
+    const eval1 = new TrajectoryEvaluator({ cwd: '/project', sessionId: 'sess-1', store });
+    eval1.initialize();
+    eval1.onFileChange('/src/a.ts', `import { x } from './x';\nconst a = 1;`, 'Write');
+    eval1.onFileChange('/src/a.ts', `import { y } from './y';\nconst a = 2;\nconst b = 3;`, 'Edit');
+    eval1.shutdown();
+    store.close();
+
+    const store2 = new TrajectoryStore({ dbPath });
+    store2.initialize();
+    const eval2 = TrajectoryEvaluator.reconstructFromStore({
+      cwd: '/project', sessionId: 'sess-1', store: store2,
+    });
+
+    // Should have latest imports (./y, not ./x)
+    expect(eval2.getRawImportCache().get('/src/a.ts')).toEqual(new Set(['./y']));
+    // Line count should be from latest (2 non-empty lines)
+    // const a = 2; and const b = 3; and import line = 3 lines
+    expect(eval2.getCurrentStep()).toBe(2);
+
+    store2.close();
+    try { fs.unlinkSync(dbPath); } catch { /* ignore */ }
+    try { fs.rmdirSync(path.dirname(dbPath)); } catch { /* ignore */ }
+  });
+});
+
 describe('normalizePath', () => {
   it('converts backslashes to forward slashes', () => {
     expect(normalizePath('C:\\Users\\test\\file.ts')).toBe('C:/Users/test/file.ts');

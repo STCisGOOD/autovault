@@ -26,6 +26,15 @@ export interface CLIConfig {
   /** Whether to auto-fund on devnet */
   autoFund: boolean;
 
+  /** Include domain profile in on-chain sync pushes. Default false.
+   *  Domain profiles reveal R&D direction — opt-in for privacy. */
+  exposeDomainProfile?: boolean;
+
+  /** Telemetry endpoint URL. Default undefined (disabled).
+   *  Must be set explicitly in config file — env vars are not accepted
+   *  because any parent process can set them (RT audit finding RT2-2). */
+  telemetryUrl?: string;
+
   /** Last known DID */
   did?: string;
 
