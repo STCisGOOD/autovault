@@ -46,10 +46,6 @@ export {
 } from './GenesisProtocol';
 
 // Solana Kit-first storage (Jan 2026 recommended stack)
-export {
-  SolanaIdentityStorageKit,
-  createSolanaKitStorage,
-  agentIdentityExistsKit,
-  agentIdentityActiveKit,
-  type SolanaKitStorageConfig,
-} from './SolanaIdentityStorageKit';
+// NOTE: Value exports removed — @solana-program/memo (optional peer dep) crashes
+// the module loader when not installed. Use dynamic import() for runtime access.
+export type { SolanaKitStorageConfig } from './SolanaIdentityStorageKit';

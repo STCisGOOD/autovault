@@ -151,6 +151,96 @@ function getGitVerifiedPath(): string {
   return path.join(getStorageDir(), 'git-verified.json');
 }
 
+/**
+ * Active session tracking file. Written by SessionStart, read by PostToolUse
+ * and SessionEnd to recover the session_id when stdin parsing fails.
+ *
+ * Claude Code docs confirm session_id is always piped in stdin for all events.
+ * The 128+ ghost session files prove stdin parsing fails silently in practice.
+ * This file bridges the gap when that happens.
+ *
+ * Concurrency: For parallel sessions (RSI Phase 2/4), each Claude Code instance
+ * pipes its own session_id via stdin (Tier 1). This file is only a fallback for
+ * stdin failures — rare enough that last-writer-wins is acceptable. If parallel
+ * stdin failures occur simultaneously, the wrong session may be matched, but
+ * that's better than orphaning both.
+ */
+function getActiveSessionPath(): string {
+  return path.join(getStorageDir(), 'active-session.json');
+}
+
+/** Max age (ms) before active-session file is considered stale. */
+const ACTIVE_SESSION_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
+
+/**
+ * Resolve session ID with three-tier fallback:
+ * 1. stdin session_id (from Claude Code) — canonical source, always sent per docs
+ * 2. active-session.json file (written by SessionStart) — for stdin parse failures
+ * 3. session_${Date.now()} — last resort, creates an orphan
+ */
+function resolveSessionId(input: HookInput, options: HookOptions): string {
+  // Tier 1: explicit from Claude Code or CLI option
+  if (input.session_id) return input.session_id;
+  if (options.session) return options.session;
+
+  // Tier 2: read from active-session file with TTL guard
+  try {
+    const activePath = getActiveSessionPath();
+    if (fs.existsSync(activePath)) {
+      const content = fs.readFileSync(activePath, 'utf8');
+      const active = JSON.parse(content);
+      if (active.sessionId && typeof active.sessionId === 'string' && active.startedAt) {
+        // Stale check: if session started > TTL ago, it likely crashed without
+        // clearActiveSession(). Ignore it to prevent cross-session contamination.
+        const age = Date.now() - new Date(active.startedAt).getTime();
+        if (age < ACTIVE_SESSION_TTL_MS) {
+          return active.sessionId;
+        }
+      }
+    }
+  } catch {
+    // Corrupt or missing — fall through
+  }
+
+  // Tier 3: timestamp fallback (creates orphan, but at least doesn't crash)
+  return `session_${Date.now()}`;
+}
+
+/**
+ * Write active session ID to disk so PostToolUse/SessionEnd can find it.
+ * Uses temp-file + rename for atomicity (prevents partial reads on Windows/NTFS).
+ */
+function writeActiveSession(sessionId: string): void {
+  try {
+    const activePath = getActiveSessionPath();
+    const tmpPath = `${activePath}.tmp`;
+    fs.writeFileSync(tmpPath, JSON.stringify({
+      sessionId,
+      startedAt: new Date().toISOString(),
+    }), { encoding: 'utf8', mode: 0o600 });
+    fs.renameSync(tmpPath, activePath);
+  } catch {
+    // Non-fatal — worst case, we fall back to tier 3
+  }
+}
+
+/** Remove active session file after SessionEnd completes. */
+function clearActiveSession(): void {
+  try {
+    const activePath = getActiveSessionPath();
+    if (fs.existsSync(activePath)) {
+      fs.unlinkSync(activePath);
+    }
+    // Clean up temp file if rename failed mid-write
+    const tmpPath = `${activePath}.tmp`;
+    if (fs.existsSync(tmpPath)) {
+      fs.unlinkSync(tmpPath);
+    }
+  } catch {
+    // Non-fatal
+  }
+}
+
 // =============================================================================
 // COMMAND DEFINITION
 // =============================================================================
@@ -179,17 +269,28 @@ async function runHook(event: string, options: HookOptions): Promise<void> {
   // Read input from stdin
   let input: HookInput = {};
 
+  let stdinRaw = '';
   try {
-    const stdin = await readStdin();
-    if (stdin.trim()) {
-      input = safeParseJson<HookInput>(stdin);
+    stdinRaw = await readStdin();
+    if (stdinRaw.trim()) {
+      input = safeParseJson<HookInput>(stdinRaw);
     }
   } catch (err) {
-    // No stdin or invalid JSON - use options
+    // Diagnostic: capture why stdin parsing fails. 128+ ghost session files
+    // prove this path fires frequently, but we never identified why.
+    // Log to stderr (doesn't pollute the JSON stdout protocol).
+    const preview = stdinRaw ? stdinRaw.slice(0, 200) : '(empty)';
+    console.error(`[hook] stdin parse failed for ${event}: ${err}. Raw: ${preview}`);
   }
 
-  // Get session ID from input or options
-  const sessionId = input.session_id || options.session || `session_${Date.now()}`;
+  // Get session ID from input, active-session file, or fallback
+  const sessionId = resolveSessionId(input, options);
+
+  // Diagnostic: log when stdin didn't provide session_id (Tier 2 or 3 was used).
+  // This tells us how often Claude Code fails to deliver session_id via stdin.
+  if (!input.session_id && !options.session) {
+    console.error(`[hook] ${event}: session_id missing from stdin, resolved to: ${sessionId}`);
+  }
 
   // Route to appropriate handler
   let output: HookOutput;
@@ -232,8 +333,9 @@ async function handleSessionStart(sessionId: string, _input: HookInput): Promise
   try {
     const validSessionId = validateSessionId(sessionId);
 
-    // Create session record
+    // Create session record and persist active session ID for cross-process hooks
     createSession(validSessionId);
+    writeActiveSession(validSessionId);
 
     // Initialize trajectory evaluator for this session
     try {
@@ -928,6 +1030,11 @@ async function handleSessionEnd(sessionId: string, input: HookInput): Promise<Ho
       continue: true,
       error: `session-end error: ${err}`,
     };
+  } finally {
+    // Always clear active session file, even if backward pass or anything else
+    // throws. Prevents stale file from poisoning the next session's Tier 2
+    // resolution. The 2-hour TTL is a backup, but this is the primary cleanup.
+    clearActiveSession();
   }
 }
 

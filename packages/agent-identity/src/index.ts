@@ -591,14 +591,13 @@ export {
 // =============================================================================
 // SOLANA KIT-FIRST STORAGE (Jan 2026 Stack)
 // =============================================================================
-
-export {
-  SolanaIdentityStorageKit,
-  createSolanaKitStorage,
-  agentIdentityExistsKit,
-  agentIdentityActiveKit,
-  type SolanaKitStorageConfig,
-} from './crypto/SolanaIdentityStorageKit';
+// NOTE: SolanaIdentityStorageKit is NOT re-exported from the barrel because it
+// imports @solana-program/memo (optional peer dependency) at module load time.
+// Static re-export crashes the entire package when memo isn't installed, killing
+// the SessionEnd backward pass for all users — even those using off-chain storage.
+// Import directly: import { SolanaIdentityStorageKit } from './crypto/SolanaIdentityStorageKit'
+// or use the dynamic import in quickStartKit() below.
+export type { SolanaKitStorageConfig } from './crypto/SolanaIdentityStorageKit';
 
 /**
  * Quick start using @solana/kit (recommended Jan 2026 stack).
