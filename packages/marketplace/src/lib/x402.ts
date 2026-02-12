@@ -12,6 +12,7 @@ import { PublicKey, Transaction, SystemProgram } from '@solana/web3.js';
 import {
   getAssociatedTokenAddress,
   createTransferInstruction,
+  createAssociatedTokenAccountInstruction,
   TOKEN_PROGRAM_ID,
 } from '@solana/spl-token';
 import { getConnection } from './solana';
@@ -78,16 +79,31 @@ export async function createUsdcTransferTx(
   const senderATA = await getAssociatedTokenAddress(usdcMint, senderPubkey);
   const recipientATA = await getAssociatedTokenAddress(usdcMint, recipientPubkey);
 
-  const transferIx = createTransferInstruction(
-    senderATA,
-    recipientATA,
-    senderPubkey,
-    amount,
-    [],
-    TOKEN_PROGRAM_ID
-  );
+  const tx = new Transaction();
 
-  const tx = new Transaction().add(transferIx);
+  // Create recipient ATA if it doesn't exist (required for first-time recipients)
+  const recipientATAInfo = await connection.getAccountInfo(recipientATA);
+  if (!recipientATAInfo) {
+    tx.add(
+      createAssociatedTokenAccountInstruction(
+        senderPubkey,    // payer
+        recipientATA,    // ATA to create
+        recipientPubkey, // owner
+        usdcMint,        // mint
+      ),
+    );
+  }
+
+  tx.add(
+    createTransferInstruction(
+      senderATA,
+      recipientATA,
+      senderPubkey,
+      amount,
+      [],
+      TOKEN_PROGRAM_ID,
+    ),
+  );
   tx.feePayer = senderPubkey;
 
   const { blockhash } = await connection.getLatestBlockhash('confirmed');

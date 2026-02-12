@@ -1,19 +1,16 @@
 /**
  * PaymentFlow — x402 USDC payment modal.
  *
- * Steps:
- * 1. Check wallet connected
- * 2. Check USDC balance
- * 3. Create + sign USDC transfer
- * 4. Get transaction signature
- * 5. Verify with backend (or show success for devnet)
+ * Security fixes:
+ * - Uses useWallet() hook for connected/publicKey (not nanostores, which are
+ *   console-manipulable). Nanostores are fine for display; not for auth gates.
+ * - useRef guard prevents double-payment from useEffect re-firing.
+ * - Signature validated as base58 before rendering in explorer URL.
  */
 
-import { useState, useEffect } from 'react';
-import { useStore } from '@nanostores/react';
+import { useState, useEffect, useRef } from 'react';
 import { PublicKey } from '@solana/web3.js';
 import { useWallet } from '@solana/wallet-adapter-react';
-import { $walletConnected, $walletAddress } from '../stores/wallet';
 import { getUsdcBalance, executePayment } from '../lib/x402';
 
 interface PaymentFlowProps {
@@ -25,20 +22,27 @@ interface PaymentFlowProps {
 
 type PaymentStep = 'check-wallet' | 'check-balance' | 'signing' | 'confirming' | 'success' | 'error';
 
+const BASE58_SIG = /^[1-9A-HJ-NP-Za-km-z]{87,88}$/;
+
 export default function PaymentFlow({
   agentPubkey,
   priceUSDC,
   onSuccess,
   onClose,
 }: PaymentFlowProps) {
-  const connected = useStore($walletConnected);
-  const address = useStore($walletAddress);
-  const { signTransaction } = useWallet();
+  // H3 fix: Read wallet state from the adapter hook, not nanostores.
+  // useWallet() is bound to the WalletProvider context and cannot be
+  // spoofed via browser console.
+  const { connected, publicKey, signTransaction } = useWallet();
 
   const [step, setStep] = useState<PaymentStep>('check-wallet');
-  const [balance, setBalance] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [signature, setSignature] = useState<string | null>(null);
+
+  // H2 fix: Prevent double payment execution from useEffect re-firing.
+  const payingRef = useRef(false);
+
+  const address = publicKey?.toBase58() ?? null;
 
   // Step 1: Check wallet
   useEffect(() => {
@@ -51,28 +55,37 @@ export default function PaymentFlow({
   useEffect(() => {
     if (step !== 'check-balance' || !address) return;
 
+    let cancelled = false;
+
     async function checkBalance() {
       try {
         const bal = await getUsdcBalance(new PublicKey(address!));
-        setBalance(bal);
+        if (cancelled) return;
         if (bal >= priceUSDC) {
           setStep('signing');
         } else {
           setError(`Insufficient USDC balance: ${bal.toFixed(4)} < ${priceUSDC}`);
           setStep('error');
         }
-      } catch (err) {
-        setError('Failed to check USDC balance');
-        setStep('error');
+      } catch {
+        if (!cancelled) {
+          setError('Failed to check USDC balance');
+          setStep('error');
+        }
       }
     }
 
     checkBalance();
+    return () => { cancelled = true; };
   }, [step, address, priceUSDC]);
 
-  // Step 3: Execute payment
+  // Step 3: Execute payment (guarded against double-fire)
   useEffect(() => {
     if (step !== 'signing' || !address || !signTransaction) return;
+    if (payingRef.current) return; // Already executing
+    payingRef.current = true;
+
+    let cancelled = false;
 
     async function pay() {
       try {
@@ -81,8 +94,10 @@ export default function PaymentFlow({
           new PublicKey(address!),
           signTransaction,
           priceUSDC,
-          new PublicKey(agentPubkey)
+          new PublicKey(agentPubkey),
         );
+
+        if (cancelled) return;
 
         if (result.success && result.signature) {
           setSignature(result.signature);
@@ -93,13 +108,26 @@ export default function PaymentFlow({
           setStep('error');
         }
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Payment failed');
-        setStep('error');
+        if (!cancelled) {
+          const msg = err instanceof Error ? err.message : 'Payment failed';
+          if (msg.includes('User rejected')) {
+            setStep('check-wallet');
+          } else {
+            setError(msg);
+            setStep('error');
+          }
+        }
+      } finally {
+        payingRef.current = false;
       }
     }
 
     pay();
-  }, [step, address, signTransaction, priceUSDC, onSuccess]);
+    return () => { cancelled = true; };
+  }, [step, address, signTransaction, priceUSDC, agentPubkey]);
+
+  // Validate signature before using in URLs
+  const validSig = signature && BASE58_SIG.test(signature);
 
   return (
     <div className="space-y-4">
@@ -165,14 +193,14 @@ export default function PaymentFlow({
         </div>
       )}
 
-      {step === 'success' && signature && (
+      {step === 'success' && validSig && (
         <div className="text-center space-y-2">
           <div className="text-vault-accent text-sm">Payment Successful</div>
           <div className="text-[10px] text-vault-accent-dim font-mono break-all">
             Signature: {signature}
           </div>
           <a
-            href={`https://explorer.solana.com/tx/${signature}?cluster=devnet`}
+            href={`https://explorer.solana.com/tx/${encodeURIComponent(signature!)}?cluster=devnet`}
             target="_blank"
             rel="noopener"
             className="inline-block text-[10px] text-vault-accent-dim hover:text-vault-accent
@@ -203,7 +231,7 @@ export default function PaymentFlow({
       <div className="flex items-center justify-center gap-2 pt-2 border-t border-vault-border/30">
         <div className="w-2 h-2 rounded-full bg-vault-emerald animate-pulse" />
         <span className="text-[9px] text-vault-accent-faint uppercase tracking-wider">
-          Devnet — use{' '}
+          Devnet &mdash; use{' '}
           <a
             href="https://faucet.circle.com/"
             target="_blank"
