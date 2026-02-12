@@ -437,28 +437,50 @@ async function handleSessionStart(sessionId: string, _input: HookInput): Promise
       // Git verification failure is non-fatal
     }
 
-    // Load identity and get guidance (including ARIL directives)
+    // Load identity and get guidance (including ARIL directives).
+    // ARIL_DISABLED=true skips all injection — used for ablation control.
     let systemMessage = '';
-    try {
-      const agent = await AgentIdentity.load({ offline: true });
-      const guidance = agent.getCompactGuidance();
+    const arilDisabled = process.env.ARIL_DISABLED === 'true';
 
-      // Include ARIL guidance if available
-      const arilGuidance = agent.getARILGuidanceMarkdown();
+    if (!arilDisabled) {
+      try {
+        const agent = await AgentIdentity.load({ offline: true });
+        const guidance = agent.getCompactGuidance();
 
-      const parts: string[] = [];
-      if (guidance && guidance !== 'Balanced behavioral profile - no strong tendencies.') {
-        parts.push(guidance);
-      }
-      if (arilGuidance) {
-        parts.push(arilGuidance);
+        // Include ARIL guidance if available
+        const arilGuidance = agent.getARILGuidanceMarkdown();
+
+        const parts: string[] = [];
+        if (guidance && guidance !== 'Balanced behavioral profile - no strong tendencies.') {
+          parts.push(guidance);
+        }
+        if (arilGuidance) {
+          parts.push(arilGuidance);
+        }
+
+        if (parts.length > 0) {
+          systemMessage = `[Persistent Identity: ${agent.did.slice(0, 30)}...]\n${parts.join('\n')}`;
+        }
+      } catch {
+        // Identity not initialized - that's OK
       }
 
-      if (parts.length > 0) {
-        systemMessage = `[Persistent Identity: ${agent.did.slice(0, 30)}...]\n${parts.join('\n')}`;
-      }
-    } catch {
-      // Identity not initialized - that's OK
+      // Primary ARIL injection: read strategy file written by previous SessionEnd.
+      // Independent of identity loading — works even if offline mode returns defaults.
+      try {
+        const projectDir = _input.cwd;
+        if (projectDir) {
+          const strategyPath = path.join(projectDir, '.aril', 'strategies.md');
+          if (fs.existsSync(strategyPath)) {
+            const strategyContent = fs.readFileSync(strategyPath, 'utf8').trim();
+            if (strategyContent) {
+              systemMessage = systemMessage
+                ? `${systemMessage}\n${strategyContent}`
+                : strategyContent;
+            }
+          }
+        }
+      } catch { /* strategy file read failure is non-fatal */ }
     }
 
     return {
@@ -974,6 +996,11 @@ async function handleSessionEnd(sessionId: string, input: HookInput): Promise<Ho
           if (strategyResult) {
             arilSummary += ', strategies updated';
           }
+
+          // Update CLAUDE.md behavioral profile with evolved weights
+          try {
+            updateCLAUDEmdProfile(identity, projectDir, config.did);
+          } catch { /* profile update failure is non-fatal */ }
         }
       } catch (stratErr) {
         // Strategy file failure must not block session completion
@@ -1255,8 +1282,11 @@ async function writeStrategyFile(
   fs.writeFileSync(strategyPath, doc.markdown, 'utf8');
 
   // 5. Ensure CLAUDE.md and AGENTS.md reference the strategy file
+  // Claude Code stores CLAUDE.md at .claude/CLAUDE.md — check both locations.
+  const claudeMdRoot = path.join(projectDir, 'CLAUDE.md');
+  const claudeMdDotDir = path.join(projectDir, '.claude', 'CLAUDE.md');
   ensureFileReference(
-    path.join(projectDir, 'CLAUDE.md'),
+    fs.existsSync(claudeMdRoot) ? claudeMdRoot : claudeMdDotDir,
     '@.aril/strategies.md',
   );
   ensureFileReference(
@@ -1306,6 +1336,76 @@ function ensureFileReference(filePath: string, reference: string): void {
   } catch {
     // Reference injection failure is non-fatal
   }
+}
+
+/**
+ * Update the PERSISTENCE-IDENTITY block in CLAUDE.md with evolved weights.
+ *
+ * Keeps the behavioral profile in sync with ARIL's learned state so the agent
+ * sees current weights (not factory 50%) when CLAUDE.md is loaded at session start.
+ * Only updates if the marker comments exist — won't create the block from scratch.
+ */
+function updateCLAUDEmdProfile(
+  identity: { getWeights(): Float64Array; getSessionCount(): number },
+  projectDir: string,
+  did?: string,
+): void {
+  const claudeMdRoot = path.join(projectDir, 'CLAUDE.md');
+  const claudeMdDotDir = path.join(projectDir, '.claude', 'CLAUDE.md');
+  const claudeMdPath = fs.existsSync(claudeMdRoot) ? claudeMdRoot : claudeMdDotDir;
+  if (!fs.existsSync(claudeMdPath)) return;
+
+  const content = fs.readFileSync(claudeMdPath, 'utf8');
+  const startMarker = '<!-- PERSISTENCE-IDENTITY:START';
+  const endMarker = '<!-- PERSISTENCE-IDENTITY:END -->';
+  const startIdx = content.indexOf(startMarker);
+  const endIdx = content.indexOf(endMarker);
+  if (startIdx === -1 || endIdx === -1) return;
+
+  const weights = identity.getWeights();
+  const sessionCount = identity.getSessionCount();
+  const dims = ['Curiosity', 'Precision', 'Persistence', 'Empathy'];
+
+  const rows = dims.map((dim, i) => {
+    const w = weights[i] ?? 0.5;
+    const pct = Math.round(w * 100);
+    let level = 'Moderate';
+    if (w >= 0.7) level = 'High';
+    else if (w <= 0.3) level = 'Low';
+    return `| ${dim} | ${pct}% | ${level} |`;
+  });
+
+  const didLine = did
+    ? `**DID:** \`${did}\``
+    : '**DID:** (not configured)';
+
+  const newBlock = `<!-- PERSISTENCE-IDENTITY:START - Do not edit manually -->
+## My Persistent Identity
+
+${didLine}
+**Network:** devnet
+**Evolution:** ${sessionCount} sessions
+
+### Behavioral Profile
+
+| Dimension | Weight | Guidance |
+|-----------|--------|----------|
+${rows.join('\n')}
+
+### Session Guidance
+
+Based on my profile, I should:
+- Focus on strategies in @.aril/strategies.md
+
+### Coherence Note
+
+My self-model aligns with my actual behavior. I can trust my intuitions.
+
+<!-- PERSISTENCE-IDENTITY:END -->`;
+
+  const before = content.substring(0, startIdx);
+  const after = content.substring(endIdx + endMarker.length);
+  fs.writeFileSync(claudeMdPath, before + newBlock + after, 'utf8');
 }
 
 // =============================================================================

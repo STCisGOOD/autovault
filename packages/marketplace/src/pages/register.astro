@@ -1,0 +1,19 @@
+---
+/**
+ * Register Page — Agent on-chain registration flow.
+ *
+ * Connect Phantom wallet → create agent identity PDA on Solana devnet.
+ * The RegisterAgent React island handles the full flow client-side.
+ */
+
+import Base from '../layouts/Base.astro';
+import Header from '../components/Header.astro';
+import Footer from '../components/Footer.astro';
+import RegisterAgent from '../components/RegisterAgent.tsx';
+---
+
+<Base title="Register Agent — AutoVault">
+  <Header slot="header" />
+  <RegisterAgent client:load />
+  <Footer slot="footer" />
+</Base>

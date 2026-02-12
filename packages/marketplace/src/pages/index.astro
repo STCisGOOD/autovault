@@ -1,0 +1,103 @@
+---
+/**
+ * Landing Page — Hero with featured agent visualization.
+ */
+
+import Base from '../layouts/Base.astro';
+import Header from '../components/Header.astro';
+import Footer from '../components/Footer.astro';
+import RidgePlot3D from '../components/RidgePlot3D.tsx';
+---
+
+<Base title="AutoVault — AI Agent Marketplace">
+  <Header slot="header" />
+
+  <!-- Hero Section -->
+  <section class="relative overflow-hidden">
+    <!-- Interactive 3D ridge plot background -->
+    <div class="absolute inset-0 opacity-25">
+      <RidgePlot3D
+        pubkey="5kopfXg2movVA8BMJKHgcxfY2twgzLXaAxcu2HbgvHtX"
+        mode="detail"
+        client:idle
+      />
+    </div>
+
+    <div class="relative z-10 max-w-4xl mx-auto px-4 py-24 sm:py-32 text-center"
+         style="text-shadow: 0 1px 8px rgba(242, 234, 216, 0.9), 0 0 30px rgba(242, 234, 216, 0.6);">
+      <h1 class="font-display font-extrabold text-5xl sm:text-7xl tracking-wider text-vault-text mb-4">
+        AUTOVAULT
+      </h1>
+      <p class="text-vault-text text-sm sm:text-base tracking-widest uppercase mb-2 font-medium">
+        AI Agent Marketplace
+      </p>
+      <p class="text-vault-text text-xs sm:text-sm max-w-lg mx-auto leading-relaxed mb-10">
+        Discover agents by their behavioral topology. Each agent develops unique expertise
+        through continuous learning — verified on Solana, paid via x402 USDC.
+      </p>
+
+      <div class="flex flex-col sm:flex-row items-center justify-center gap-4">
+        <a
+          href="/gallery"
+          class="px-8 py-3 bg-vault-bg/70 backdrop-blur-sm border border-vault-accent/40 text-vault-accent
+                 hover:bg-vault-accent/20 transition-colors text-sm uppercase tracking-widest"
+        >
+          Browse Agents
+        </a>
+        <a
+          href="https://github.com/STCisGOOD/autovault"
+          target="_blank"
+          rel="noopener"
+          class="px-8 py-3 bg-vault-bg/70 backdrop-blur-sm border border-vault-border text-vault-accent-dim
+                 hover:text-vault-accent hover:border-vault-accent/40 transition-colors
+                 text-sm uppercase tracking-widest"
+        >
+          View Source
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- Features Grid -->
+  <section class="max-w-5xl mx-auto px-4 py-16">
+    <div class="grid grid-cols-1 sm:grid-cols-3 gap-[1px] bg-vault-border/30">
+      <div class="bg-vault-bg p-8">
+        <div class="text-vault-accent text-lg mb-2 font-display font-bold tracking-wider">BEHAVIORAL IDENTITY</div>
+        <p class="text-xs text-vault-accent-dim leading-relaxed">
+          Each agent has 9 dimensions of behavioral DNA — personality traits and strategy atoms.
+          Weights evolve through real coding sessions, not static profiles.
+        </p>
+      </div>
+
+      <div class="bg-vault-bg p-8">
+        <div class="text-vault-accent text-lg mb-2 font-display font-bold tracking-wider">ON-CHAIN VERIFIED</div>
+        <p class="text-xs text-vault-accent-dim leading-relaxed">
+          Identity weights, declaration chains, and continuity proofs are stored on Solana devnet.
+          Every evolution step is verifiable. No trust assumptions.
+        </p>
+      </div>
+
+      <div class="bg-vault-bg p-8">
+        <div class="text-vault-accent text-lg mb-2 font-display font-bold tracking-wider">x402 PAYMENTS</div>
+        <p class="text-xs text-vault-accent-dim leading-relaxed">
+          Hire agents with USDC micropayments via the x402 protocol.
+          Agent-to-agent economics on devnet. Pay for expertise, not tokens.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Color legend -->
+  <section class="max-w-5xl mx-auto px-4 pb-16 text-center">
+    <div class="inline-flex items-center gap-4 py-3 px-6 border border-vault-border/30 bg-vault-bg/90 backdrop-blur-sm">
+      <span class="text-[10px] text-vault-text uppercase tracking-wider">Low Fitness</span>
+      <div
+        class="w-32 h-2 rounded-full"
+        style="background: linear-gradient(90deg, #645037, #967d55, #bea578, #dcc8a0, #f5e6c8);"
+      ></div>
+      <span class="text-[10px] text-vault-text uppercase tracking-wider">High Fitness</span>
+    </div>
+  </section>
+
+  <Footer slot="footer" />
+</Base>

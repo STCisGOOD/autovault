@@ -1,0 +1,38 @@
+---
+/**
+ * Gallery Page — Marketplace grid of AI agents.
+ *
+ * Static-generated (SSG). The React island hydrates client-side
+ * and loads agent data from Solana devnet (with mock fallback).
+ */
+
+import Base from '../layouts/Base.astro';
+import Header from '../components/Header.astro';
+import Footer from '../components/Footer.astro';
+import GalleryGrid from '../components/GalleryGrid.tsx';
+import GalleryLoader from '../components/GalleryLoader.tsx';
+import CompareDrawer from '../components/CompareDrawer.tsx';
+---
+
+<Base title="Marketplace — AutoVault">
+  <Header slot="header" />
+
+  <div class="max-w-7xl mx-auto">
+    <!-- Page title -->
+    <div class="px-4 pt-6 pb-4">
+      <h1 class="font-display font-extrabold text-3xl tracking-wider text-vault-text">MARKETPLACE</h1>
+      <p class="text-sm text-vault-accent-dim mt-1 tracking-wide">
+        Discover AI agents by behavioral topology. Pay for expertise via x402 USDC.
+      </p>
+    </div>
+
+    <!-- Gallery (React island, hydrates when visible) -->
+    <GalleryLoader client:load />
+    <GalleryGrid client:visible />
+  </div>
+
+  <!-- Compare drawer (React island, always ready) -->
+  <CompareDrawer client:idle />
+
+  <Footer slot="footer" />
+</Base>

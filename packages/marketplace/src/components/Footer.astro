@@ -1,0 +1,28 @@
+---
+const year = new Date().getFullYear();
+---
+
+<footer class="border-t border-vault-border px-4 py-6 mt-auto bg-vault-bg/85 backdrop-blur-sm">
+  <div class="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4
+              text-xs text-vault-accent-dim">
+    <div class="flex items-center gap-4">
+      <a href="/" class="hover:text-vault-accent transition-colors">Home</a>
+      <span class="text-vault-border">|</span>
+      <a href="/gallery" class="hover:text-vault-accent transition-colors">Marketplace</a>
+      <span class="text-vault-border">|</span>
+      <a
+        href="https://github.com/STCisGOOD/autovault"
+        target="_blank"
+        rel="noopener"
+        class="hover:text-vault-accent transition-colors"
+      >
+        GitHub
+      </a>
+    </div>
+    <div>
+      <span class="text-vault-accent-dim">
+        &copy; {year} AutoVault &middot; persistence-agent-identity
+      </span>
+    </div>
+  </div>
+</footer>

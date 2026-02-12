@@ -1,0 +1,22 @@
+---
+/**
+ * Agent Detail Page — Static page, reads pubkey from URL query param.
+ *
+ * URL: /agent?did=did:persistence:devnet:<pubkey>
+ *  or: /agent?key=<pubkey>
+ *
+ * The React island reads the query param client-side and renders the full profile.
+ * No SSR adapter needed.
+ */
+
+import Base from '../layouts/Base.astro';
+import Header from '../components/Header.astro';
+import Footer from '../components/Footer.astro';
+import AgentDetailLoader from '../components/AgentDetailLoader.tsx';
+---
+
+<Base title="Agent — AutoVault">
+  <Header slot="header" />
+  <AgentDetailLoader client:load />
+  <Footer slot="footer" />
+</Base>

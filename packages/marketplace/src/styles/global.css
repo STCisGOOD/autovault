@@ -1,0 +1,100 @@
+@import 'tailwindcss';
+
+/* ─── Tailwind v4 Theme Configuration ─────────────────────────── */
+/* Aged Vellum palette — warm parchment with bistre ink tones      */
+
+@theme {
+  --color-vault-bg: #f2ead8;
+  --color-vault-surface: #ebe3d0;
+  --color-vault-border: #6b4c3a20;
+  --color-vault-accent: #6b4c3a;
+  --color-vault-accent-dim: #7d5c47;
+  --color-vault-accent-faint: #9a8472;
+  --color-vault-text: #3a2818;
+  --color-vault-text-dim: #8a6e55;
+  --color-vault-indigo: #78350f;
+  --color-vault-violet: #92400e;
+  --color-vault-cyan: #6b4c3a;
+  --color-vault-emerald: #78450f;
+  --color-vault-amber: #78450f;
+
+  --font-sans: 'DM Sans', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Courier New', monospace;
+  --font-display: 'Syne', 'DM Sans', sans-serif;
+  --font-serif: 'Georgia', 'Times New Roman', serif;
+}
+
+/* ─── Self-hosted Fonts ──────────────────────────────────────── */
+
+@font-face {
+  font-family: 'DM Sans';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('/fonts/dm-sans-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'DM Sans';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('/fonts/dm-sans-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+  font-family: 'Syne';
+  font-style: normal;
+  font-weight: 400 800;
+  font-display: swap;
+  src: url('/fonts/syne-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'Syne';
+  font-style: normal;
+  font-weight: 400 800;
+  font-display: swap;
+  src: url('/fonts/syne-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+/* ─── Base ────────────────────────────────────────────────────── */
+
+html {
+  background: #f2ead8;
+  color: #3a2818;
+  font-family: 'DM Sans', system-ui, sans-serif;
+  scrollbar-color: #6b4c3a33 #f2ead8;
+}
+
+body {
+  min-height: 100vh;
+}
+
+::selection {
+  background: #6b4c3a22;
+  color: #3a2818;
+}
+
+/* ─── Scrollbar ───────────────────────────────────────────────── */
+
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f2ead8;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #6b4c3a30;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #6b4c3a55;
+}

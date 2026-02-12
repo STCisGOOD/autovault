@@ -56,5 +56,5 @@ test-probe*
 # Internal experiments (proprietary simulations)
 experiments/
 
-# Marketplace UI (not ready for public)
-packages/marketplace/
+# Marketplace UI
+# packages/marketplace/
