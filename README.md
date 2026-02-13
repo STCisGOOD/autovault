@@ -1,4 +1,4 @@
-# AutoVault
+# Synap-AI
 
 **Self-evolving identity for AI agents on Solana**
 
