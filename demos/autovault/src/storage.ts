@@ -1,5 +1,5 @@
 /**
- * AutoVault Persistent Storage Layer
+ * Synap-AI Persistent Storage Layer
  *
  * The bridge between ephemeral and eternal.
  *
@@ -29,7 +29,7 @@ export interface StorageBackend {
 // ============ VERCEL KV BACKEND ============
 
 class VercelKVStorage implements StorageBackend {
-  private prefix = 'autovault:';
+  private prefix = 'Synap-AI:';
 
   async get<T>(key: string): Promise<T | null> {
     try {

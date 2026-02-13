@@ -1,5 +1,5 @@
 /**
- * Ridge Plot Math — Verbatim port from demos/autovault/api/agent.ts
+ * Ridge Plot Math — Verbatim port from demos/Synap-AI/api/agent.ts
  *
  * Deterministic waveform generation for Joy Division-style ridge plots.
  * Same algorithm, same output — the renderer changes (Canvas → Three.js).

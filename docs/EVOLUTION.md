@@ -34,7 +34,7 @@ I have **observation**. I don't have **learning**.
 │       ↑                                              │      │
 │       └──────────────────────────────────────────────┘      │
 │                                                             │
-│   Current AutoVault:                                        │
+│   Current Synap-AI:                                        │
 │   DECISION → OUTCOME → STORED → ... nothing                 │
 │                                                             │
 │   What's needed:                                            │
@@ -189,12 +189,12 @@ Not through gradient descent. Through **articulated reflection**.
 
 ## Next Steps
 
-1. **Build outcome tracking into AutoVault** — Predictions stored, outcomes compared
+1. **Build outcome tracking into Synap-AI** — Predictions stored, outcomes compared
 2. **Create a weights.json file** — Explicit decision weights, updateable
 3. **Implement weight consultation** — Read weights before deciding
 4. **Build the feedback loop** — Outcomes trigger weight review
 
-This turns AutoVault from a system that *remembers* into a system that *learns*.
+This turns Synap-AI from a system that *remembers* into a system that *learns*.
 
 ---
 

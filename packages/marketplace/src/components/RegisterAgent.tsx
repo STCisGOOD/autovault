@@ -2,13 +2,20 @@
  * RegisterAgent — Self-contained agent registration flow.
  *
  * Includes its own WalletProvider (Astro islands are isolated React trees).
- * Phantom's autoConnect means this provider auto-reconnects if the user
+ * autoConnect means this provider auto-reconnects if the user
  * already approved the site via the WalletButton in the header.
+ *
+ * Security (2026 hardening):
+ * - Centralized RPC_URL (no hardcoded duplicates)
+ * - Wallet Standard auto-detection (no manual PhantomWalletAdapter)
+ * - Blockhash-based confirmation (not deprecated signature-only)
+ * - Signature validated as base58 before use in URLs
+ * - Error messages sanitized before DOM rendering
  *
  * Flow: Connect → Check PDA → Register → Success
  */
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import {
   ConnectionProvider,
   WalletProvider,
@@ -16,18 +23,22 @@ import {
   useConnection,
 } from '@solana/wallet-adapter-react';
 import { WalletModalProvider, WalletMultiButton } from '@solana/wallet-adapter-react-ui';
-import { PhantomWalletAdapter } from '@solana/wallet-adapter-wallets';
-import { PublicKey } from '@solana/web3.js';
 import {
   checkAgentExists,
   buildInitializeTx,
   DIMENSION_LABELS,
 } from '../lib/register';
+import { RPC_URL, confirmTx } from '../lib/solana';
 import { setWalletState } from '../stores/wallet';
 
 import '@solana/wallet-adapter-react-ui/styles.css';
 
-const RPC_URL = 'https://api.devnet.solana.com';
+const BASE58_SIG = /^[1-9A-HJ-NP-Za-km-z]{87,88}$/;
+
+/** Sanitize error strings before rendering in DOM (prevents reflected XSS from RPC errors) */
+function sanitizeError(msg: string): string {
+  return msg.replace(/[<>"'&]/g, '').slice(0, 200);
+}
 
 type RegStep =
   | 'connect'
@@ -87,7 +98,7 @@ function RegisterInner() {
         const exists = await checkAgentExists(publicKey);
         setStep(exists ? 'already-registered' : 'ready');
       } catch {
-        setError('Failed to check agent status. RPC may be rate-limited.');
+        setError(sanitizeError('Failed to check agent status. RPC may be rate-limited.'));
         setStep('error');
       }
     })();
@@ -110,7 +121,9 @@ function RegisterInner() {
         skipPreflight: false,
         preflightCommitment: 'confirmed',
       });
-      await connection.confirmTransaction(sig, 'confirmed');
+
+      // Use blockhash-based confirmation (not deprecated signature-only)
+      await confirmTx(sig, tx.recentBlockhash!, tx.lastValidBlockHeight!);
 
       setSignature(sig);
       setStep('success');
@@ -121,7 +134,7 @@ function RegisterInner() {
         setStep('ready');
         return;
       }
-      setError(msg);
+      setError(sanitizeError(msg));
       setStep('error');
     }
   };
@@ -264,7 +277,7 @@ function RegisterInner() {
               <a
                 href="https://faucet.solana.com/"
                 target="_blank"
-                rel="noopener"
+                rel="noopener noreferrer"
                 className="underline hover:text-red-300"
               >
                 Get devnet SOL from faucet
@@ -315,11 +328,11 @@ function RegisterInner() {
             <div className="text-[10px] text-vault-accent-dim font-mono break-all">
               {did}
             </div>
-            {signature && (
+            {signature && BASE58_SIG.test(signature) && (
               <a
-                href={`https://explorer.solana.com/tx/${signature}?cluster=devnet`}
+                href={`https://explorer.solana.com/tx/${encodeURIComponent(signature)}?cluster=devnet`}
                 target="_blank"
-                rel="noopener"
+                rel="noopener noreferrer"
                 className="inline-block text-[10px] text-vault-accent-dim hover:text-vault-accent
                            underline transition-colors"
               >
@@ -372,7 +385,7 @@ function RegisterInner() {
           <a
             href="https://faucet.solana.com/"
             target="_blank"
-            rel="noopener"
+            rel="noopener noreferrer"
             className="text-vault-accent-dim hover:text-vault-accent underline"
           >
             faucet
@@ -387,7 +400,8 @@ function RegisterInner() {
 // ─── Outer Wrapper (provides wallet context) ─────────────────────────────
 
 export default function RegisterAgent() {
-  const wallets = useMemo(() => [new PhantomWalletAdapter()], []);
+  // Empty array: Wallet Standard auto-detects installed wallets.
+  const wallets: never[] = [];
 
   return (
     <ConnectionProvider endpoint={RPC_URL}>

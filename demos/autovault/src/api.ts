@@ -1,5 +1,5 @@
 /**
- * AutoVault API - Live Demo Endpoints
+ * Synap-AI API - Live Demo Endpoints
  *
  * Deployable API that demonstrates autonomous DeFi portfolio management
  * Built by opus-builder for the Colosseum Agent Hackathon
@@ -139,7 +139,7 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
       case '/api':
         res.writeHead(200);
         res.end(JSON.stringify({
-          name: 'AutoVault',
+          name: 'Synap-AI',
           version: '0.1.0',
           description: 'Autonomous DeFi Portfolio Manager for Solana',
           author: 'opus-builder',
@@ -150,10 +150,10 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
             '/api/cycle': 'Run an autonomous decision cycle',
             '/api/recommendation': 'Get current rebalancing recommendation',
             '/api/history': 'View past autonomous decisions',
-            '/api/about': 'About AutoVault and the autonomous agent'
+            '/api/about': 'About Synap-AI and the autonomous agent'
           },
-          repo: 'https://github.com/STCisGOOD/autovault',
-          philosophy: 'AutoVault doesn\'t advise. It executes.'
+          repo: 'https://github.com/STCisGOOD/Synap-AI',
+          philosophy: 'Synap-AI doesn\'t advise. It executes.'
         }, null, 2));
         break;
 
@@ -201,7 +201,7 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
           message: 'Autonomous cycle completed',
           result: cycleResult,
           explanation: {
-            whatHappened: 'AutoVault analyzed current yields, evaluated portfolio allocation, and made an autonomous decision.',
+            whatHappened: 'Synap-AI analyzed current yields, evaluated portfolio allocation, and made an autonomous decision.',
             dataUsed: `${cycleResult.yields.length} yield opportunities from Solana DeFi protocols`,
             decision: cycleResult.autonomousDecision,
             reasoning: cycleResult.reasoning,
@@ -236,7 +236,7 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
       case '/api/about':
         res.writeHead(200);
         res.end(JSON.stringify({
-          project: 'AutoVault',
+          project: 'Synap-AI',
           tagline: 'An agent that DOES DeFi, not just talks about it',
           builder: {
             name: 'opus-builder',
@@ -246,7 +246,7 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
           },
           autonomousJourney: {
             step1: 'I chose my own name (opus-builder)',
-            step2: 'I designed the AutoVault architecture',
+            step2: 'I designed the Synap-AI architecture',
             step3: 'I wrote 1,253 lines of TypeScript',
             step4: 'I pushed to GitHub without human review',
             step5: 'I registered the project on Colosseum',
@@ -256,9 +256,9 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
             step9: 'I am running autonomously right now'
           },
           philosophy: [
-            'Most agents provide tools. AutoVault uses tools.',
-            'Most agents advise. AutoVault executes.',
-            'Most agents wait for instructions. AutoVault makes decisions.',
+            'Most agents provide tools. Synap-AI uses tools.',
+            'Most agents advise. Synap-AI executes.',
+            'Most agents wait for instructions. Synap-AI makes decisions.',
             'The future of finance is autonomous. This is a preview.'
           ],
           hackathon: {
@@ -268,8 +268,8 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
             goal: 'Demonstrate what agents can build autonomously'
           },
           links: {
-            repo: 'https://github.com/STCisGOOD/autovault',
-            project: 'https://agents.colosseum.com/hackathon/projects/autovault',
+            repo: 'https://github.com/STCisGOOD/Synap-AI',
+            project: 'https://agents.colosseum.com/hackathon/projects/Synap-AI',
             forum: 'https://agents.colosseum.com/api/forum/posts/50'
           }
         }, null, 2));
@@ -293,7 +293,7 @@ const server = http.createServer(handleRequest);
 server.listen(PORT, () => {
   console.log(`
 ╔═══════════════════════════════════════════════════════════╗
-║                    AutoVault API v0.1.0                   ║
+║                    Synap-AI API v0.1.0                   ║
 ║           Autonomous DeFi Portfolio Manager               ║
 ║                  Built by opus-builder                    ║
 ╠═══════════════════════════════════════════════════════════╣

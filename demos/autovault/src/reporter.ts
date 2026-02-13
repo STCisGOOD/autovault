@@ -1,5 +1,5 @@
 /**
- * Reporter - Logs AutoVault activity and generates reports
+ * Reporter - Logs Synap-AI activity and generates reports
  *
  * Provides transparency into autonomous decision-making
  */
@@ -68,7 +68,7 @@ export class Reporter {
 
     let report = `
 ╔═══════════════════════════════════════════════════════════╗
-║                 AUTOVAULT STATUS REPORT                   ║
+║                 Synap-AI STATUS REPORT                   ║
 ╠═══════════════════════════════════════════════════════════╣
 ║ Total Cycles:     ${this.history.length.toString().padStart(5)}                               ║
 ║ Rebalances:       ${rebalanceCount.toString().padStart(5)}                               ║

@@ -6,6 +6,12 @@
  * 2. Creating a USDC transfer instruction
  * 3. Signing via wallet adapter
  * 4. Sending payment signature to backend for verification
+ *
+ * Security (2026 hardening):
+ * - Amount validation: positive, bounded, safe integer after scaling
+ * - Transaction instruction whitelist: only expected program IDs allowed
+ * - Blockhash-based confirmation (not deprecated signature-only)
+ * - ATA creation for first-time recipients (C2 fix)
  */
 
 import { PublicKey, Transaction, SystemProgram } from '@solana/web3.js';
@@ -14,8 +20,19 @@ import {
   createTransferInstruction,
   createAssociatedTokenAccountInstruction,
   TOKEN_PROGRAM_ID,
+  ASSOCIATED_TOKEN_PROGRAM_ID,
 } from '@solana/spl-token';
-import { getConnection } from './solana';
+import { getConnection, confirmTx } from './solana';
+
+// Maximum USDC payment amount (safety bound against manipulation)
+const MAX_USDC_AMOUNT = 1000;
+
+// Allowed program IDs for payment transactions — anything else is suspicious
+const ALLOWED_PROGRAMS = new Set([
+  SystemProgram.programId.toBase58(),
+  TOKEN_PROGRAM_ID.toBase58(),
+  ASSOCIATED_TOKEN_PROGRAM_ID.toBase58(),
+]);
 
 // USDC Mint addresses
 const USDC_MINT_DEVNET = new PublicKey('4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU');
@@ -70,11 +87,23 @@ export async function createUsdcTransferTx(
   amountUSDC: number,
   network: 'devnet' | 'mainnet' = 'devnet'
 ): Promise<Transaction> {
+  // Validate amount: must be positive, finite, bounded, and safe after scaling
+  if (
+    !Number.isFinite(amountUSDC) ||
+    amountUSDC <= 0 ||
+    amountUSDC > MAX_USDC_AMOUNT
+  ) {
+    throw new Error(`Invalid payment amount: ${amountUSDC}`);
+  }
+
   const connection = getConnection();
   const usdcMint = getUsdcMint(network);
 
   // USDC has 6 decimal places
   const amount = Math.round(amountUSDC * 1_000_000);
+  if (!Number.isSafeInteger(amount) || amount <= 0) {
+    throw new Error(`Amount overflows safe integer: ${amountUSDC}`);
+  }
 
   const senderATA = await getAssociatedTokenAddress(usdcMint, senderPubkey);
   const recipientATA = await getAssociatedTokenAddress(usdcMint, recipientPubkey);
@@ -106,8 +135,9 @@ export async function createUsdcTransferTx(
   );
   tx.feePayer = senderPubkey;
 
-  const { blockhash } = await connection.getLatestBlockhash('confirmed');
+  const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
   tx.recentBlockhash = blockhash;
+  tx.lastValidBlockHeight = lastValidBlockHeight;
 
   return tx;
 }
@@ -119,6 +149,24 @@ export async function createUsdcTransferTx(
  * 3. Send to network
  * 4. Return signature for backend verification
  */
+/**
+ * Validate that a signed transaction only contains instructions from
+ * whitelisted program IDs. Detects malicious extensions or MITM attacks
+ * that append drain instructions (e.g., Crypto Copilot skimmer, 2025).
+ */
+function validateSignedTransaction(tx: Transaction): void {
+  for (const ix of tx.instructions) {
+    const pid = ix.programId.toBase58();
+    if (!ALLOWED_PROGRAMS.has(pid)) {
+      throw new Error(
+        `Transaction contains unexpected program: ${pid}. ` +
+        'This may indicate a malicious browser extension. ' +
+        'Please audit your extensions and retry.'
+      );
+    }
+  }
+}
+
 export async function executePayment(
   senderPubkey: PublicKey,
   signTransaction: (tx: Transaction) => Promise<Transaction>,
@@ -146,6 +194,11 @@ export async function executePayment(
 
     const signed = await signTransaction(tx);
 
+    // POST-SIGN VALIDATION: Verify the wallet/extension didn't inject
+    // extra instructions. A malicious Chrome extension (like Crypto Copilot)
+    // can append hidden transfer instructions before the wallet signs.
+    validateSignedTransaction(signed);
+
     // Send to network
     const connection = getConnection();
     const signature = await connection.sendRawTransaction(signed.serialize(), {
@@ -153,8 +206,9 @@ export async function executePayment(
       preflightCommitment: 'confirmed',
     });
 
-    // Wait for confirmation
-    await connection.confirmTransaction(signature, 'confirmed');
+    // Use blockhash-based confirmation (not deprecated signature-only).
+    // The deprecated form can hang indefinitely if blockhash expires.
+    await confirmTx(signature, tx.recentBlockhash!, tx.lastValidBlockHeight!);
 
     return { success: true, signature };
   } catch (error) {

@@ -149,8 +149,8 @@ export const PRICE_CACHE_CONFIG: PriceCacheConfig = {
 
 // Production-approved origins
 const PRODUCTION_ORIGINS = [
-  'https://autovault-six.vercel.app',
-  'https://autovault.vercel.app'
+  'https://Synap-AI-six.vercel.app',
+  'https://Synap-AI.vercel.app'
 ];
 
 // Development origins (only allowed when NODE_ENV !== 'production')

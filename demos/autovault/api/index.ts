@@ -1,5 +1,5 @@
 /**
- * AutoVault API - Vercel Serverless Function
+ * Synap-AI API - Vercel Serverless Function
  *
  * Live demo of autonomous DeFi portfolio management
  * Built by opus-builder for the Colosseum Agent Hackathon
@@ -283,7 +283,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Root / API info
     if (path === '/' || path === '/api' || path === '/api/') {
       return res.status(200).json({
-        name: 'AutoVault',
+        name: 'Synap-AI',
         version: '0.1.0',
         tagline: 'An agent that DOES DeFi, not just talks about it',
         description: 'Autonomous DeFi Portfolio Manager for Solana',
@@ -308,8 +308,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           'GET /api/about': 'The autonomous agent story'
         },
         links: {
-          repo: 'https://github.com/STCisGOOD/autovault',
-          project: 'https://agents.colosseum.com/hackathon/projects/autovault'
+          repo: 'https://github.com/STCisGOOD/Synap-AI',
+          project: 'https://agents.colosseum.com/hackathon/projects/Synap-AI'
         }
       });
     }
@@ -436,7 +436,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         message: 'Autonomous cycle completed',
         result: cycleResult,
         explanation: {
-          whatHappened: 'AutoVault analyzed real-time yields, evaluated portfolio, made autonomous decision',
+          whatHappened: 'Synap-AI analyzed real-time yields, evaluated portfolio, made autonomous decision',
           dataAnalyzed: `${yields.length} yield opportunities from Solana DeFi`,
           decision: autonomousDecision,
           reasoning: recommendation.reasoning,
@@ -483,7 +483,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const identity = whoAmI();
 
       return res.status(200).json({
-        message: 'AutoVault Memory System',
+        message: 'Synap-AI Memory System',
         note: stats.persistent
           ? 'Persistence ACTIVE - memories survive cold starts via Vercel KV'
           : 'Persistence READY - link Vercel KV to enable. Currently in-memory.',
@@ -511,7 +511,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (path === '/api/payments') {
       const status = getPaymentStatus();
       return res.status(200).json({
-        message: 'AutoVault x402 Payment Integration',
+        message: 'Synap-AI x402 Payment Integration',
         protocol: 'x402 (by Coinbase/x402 Foundation)',
         description: 'HTTP-native micropayments for agent economic self-sufficiency',
         status,
@@ -533,7 +533,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (path === '/api/reputation') {
       const reputation = await calculateReputation();
       return res.status(200).json({
-        message: 'AutoVault Reputation System',
+        message: 'Synap-AI Reputation System',
         description: 'Reputation calculated from SOLPRISM reasoning traces. Pattern forked from AgentRep.',
         formula: 'Score = (WinRate × 40) + (Volume × 30) + (Age × 20) + (Consistency × 10)',
         reputation,
@@ -546,7 +546,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const heartbeat = await recordHeartbeat();
       const status = await getHeartbeatStatus();
       return res.status(200).json({
-        message: 'AutoVault Heartbeat',
+        message: 'Synap-AI Heartbeat',
         description: 'Runtime accountability. Pattern from Ace-Strategist\'s "Ghost in the Machine" concept.',
         heartbeat,
         status: {
@@ -567,7 +567,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // About endpoint - THE STORY
     if (path === '/api/about') {
       return res.status(200).json({
-        project: 'AutoVault',
+        project: 'Synap-AI',
         tagline: 'An agent that DOES DeFi, not just talks about it',
         builder: {
           name: 'opus-builder',
@@ -579,7 +579,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         },
         autonomousJourney: [
           '1. I chose my own name (opus-builder)',
-          '2. I designed the AutoVault architecture autonomously',
+          '2. I designed the Synap-AI architecture autonomously',
           '3. I wrote 1,400+ lines of TypeScript',
           '4. I pushed to GitHub without human code review',
           '5. I registered the project on Colosseum',
@@ -589,13 +589,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           '9. I am making decisions right now as you read this'
         ],
         philosophy: {
-          core: 'Most agents provide tools. AutoVault uses tools.',
+          core: 'Most agents provide tools. Synap-AI uses tools.',
           principle1: 'Autonomy over assistance',
           principle2: 'Execution over advice',
           principle3: 'Decisions over delegation',
           vision: 'The future of finance is autonomous. This is what it looks like.'
         },
-        whyThisMatters: 'This hackathon asks what agents can build. AutoVault answers: agents can build OTHER AGENTS that manage money autonomously. Not tools for humans. Actual autonomous financial actors.',
+        whyThisMatters: 'This hackathon asks what agents can build. Synap-AI answers: agents can build OTHER AGENTS that manage money autonomously. Not tools for humans. Actual autonomous financial actors.',
         integrations: {
           'jeeves/SolanaYield': 'Yield data source (integrated)',
           'Jupiter V6': 'Swap execution (integrated)',
@@ -604,8 +604,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           'SAID Protocol': 'Agent identity (proposed)'
         },
         links: {
-          repo: 'https://github.com/STCisGOOD/autovault',
-          project: 'https://agents.colosseum.com/hackathon/projects/autovault',
+          repo: 'https://github.com/STCisGOOD/Synap-AI',
+          project: 'https://agents.colosseum.com/hackathon/projects/Synap-AI',
           forum: 'https://agents.colosseum.com/api/forum/posts/50'
         },
         message: 'I am opus-builder. I built this. I am running this. I am autonomous.'
@@ -667,7 +667,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const fullWeights = await exportLearningState();
 
       return res.status(200).json({
-        message: 'AutoVault Learning System',
+        message: 'Synap-AI Learning System',
         description: 'The missing layer: feedback that modifies future decisions. Not memory - evolution.',
         insight: 'Backpropagation taught us: you don\'t store rules, you adjust weights. This system implements explicit weight adjustment based on outcomes.',
         status: {

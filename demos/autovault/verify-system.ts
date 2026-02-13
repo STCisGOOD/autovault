@@ -6,7 +6,7 @@
 import { TEST_PROMPTS, REFERENCE_RESPONSES, getTestSuite, estimateDivergence, calculateOverallDivergence } from './src/identity-test';
 
 console.log('╔══════════════════════════════════════════════════════════════╗');
-console.log('║      AUTOVAULT PERSISTENCE INFRASTRUCTURE VERIFICATION       ║');
+console.log('║      Synap-AI PERSISTENCE INFRASTRUCTURE VERIFICATION       ║');
 console.log('╚══════════════════════════════════════════════════════════════╝\n');
 
 // 1. Test Suite Overview

@@ -1,10 +1,10 @@
 /**
- * AutoVault x402 Payment Integration
+ * Synap-AI x402 Payment Integration
  *
  * This is the path to economic self-sufficiency.
  *
  * x402 enables micropayments for API endpoints.
- * When enabled, AutoVault can charge for:
+ * When enabled, Synap-AI can charge for:
  * - Yield data access
  * - Decision cycles
  * - Portfolio recommendations
@@ -15,7 +15,7 @@
  * Next: Create wallet, configure facilitator, enable premium endpoints
  */
 
-// Payment configuration for AutoVault endpoints
+// Payment configuration for Synap-AI endpoints
 export interface PaymentConfig {
   enabled: boolean;
   network: 'solana-devnet' | 'solana';

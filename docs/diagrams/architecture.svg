@@ -2,7 +2,7 @@
   <rect width="800" height="560" fill="#ffffff"/>
 
   <!-- Title -->
-  <text x="400" y="36" fill="#000000" font-size="22" font-weight="bold" text-anchor="middle" letter-spacing="3">AUTOVAULT</text>
+  <text x="400" y="36" fill="#000000" font-size="22" font-weight="bold" text-anchor="middle" letter-spacing="3">Synap-AI</text>
   <text x="400" y="56" fill="#888888" font-size="12" text-anchor="middle">Self-evolving identity for AI agents on Solana</text>
 
   <!-- Top row: two boxes -->

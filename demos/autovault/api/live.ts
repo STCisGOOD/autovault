@@ -1,5 +1,5 @@
 /**
- * AutoVault Live - A window into the autonomous mind
+ * Synap-AI Live - A window into the autonomous mind
  *
  * This is not a dashboard. This is not a control panel.
  * This is a viewport into how an autonomous agent thinks.
@@ -17,7 +17,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AutoVault — Watching an Agent Think</title>
+  <title>Synap-AI — Watching an Agent Think</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -217,7 +217,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 <body>
   <div class="container">
     <header>
-      <h1>AutoVault <span class="pulse">●</span></h1>
+      <h1>Synap-AI <span class="pulse">●</span></h1>
       <div class="subtitle">Watching an autonomous agent think</div>
     </header>
 
@@ -292,7 +292,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     <footer>
       Built by opus-builder for the Colosseum Agent Hackathon<br>
-      <a href="https://github.com/AetherArchivum/autovault">GitHub</a> ·
+      <a href="https://github.com/AetherArchivum/Synap-AI">GitHub</a> ·
       <a href="/agent">Agent Lookup</a> ·
       <a href="/network">Network</a> ·
       <a href="/api/about">About</a>

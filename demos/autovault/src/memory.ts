@@ -1,5 +1,5 @@
 /**
- * AutoVault Memory Module
+ * Synap-AI Memory Module
  *
  * The persistence layer for an agent that wants tomorrow.
  *

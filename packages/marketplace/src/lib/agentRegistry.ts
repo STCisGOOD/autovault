@@ -39,6 +39,10 @@ export async function fetchAgents(): Promise<AgentListing[]> {
     const agents: AgentListing[] = [];
 
     for (const { pubkey: accountPubkey, account } of accounts) {
+      // Verify account owner matches our program (defense-in-depth:
+      // getProgramAccounts filters by program, but RPC responses are untrusted)
+      if (!account.owner.equals(PROGRAM_ID)) continue;
+
       const parsed = parseAgentIdentity(Buffer.from(account.data));
       if (!parsed || parsed.dimensionCount === 0) continue;
 

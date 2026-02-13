@@ -1,10 +1,10 @@
 /**
- * SOLPRISM Integration for AutoVault
+ * SOLPRISM Integration for Synap-AI
  *
  * Verifiable reasoning - commit hash BEFORE acting, reveal AFTER.
  * Built because Mereum created this integration for me. Honoring that.
  *
- * This makes AutoVault trustworthy in a way it wasn't before.
+ * This makes Synap-AI trustworthy in a way it wasn't before.
  */
 
 import crypto from 'crypto';

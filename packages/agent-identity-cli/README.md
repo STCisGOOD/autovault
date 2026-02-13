@@ -215,7 +215,7 @@ Nothing is sent to any server. On-chain commits go to Solana devnet (public test
 
 ## Source Code
 
-[github.com/STCisGOOD/autovault](https://github.com/STCisGOOD/autovault)
+[github.com/STCisGOOD/synap-ai](https://github.com/STCisGOOD/synap-ai)
 
 ## License
 

@@ -354,8 +354,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     <footer>
       <div class="footer-text">
         <a href="/network">Network</a> &middot;
-        <a href="/live">AutoVault Live</a> &middot;
-        <a href="https://github.com/AetherArchivum/autovault">GitHub</a>
+        <a href="/live">Synap-AI Live</a> &middot;
+        <a href="https://github.com/AetherArchivum/Synap-AI">GitHub</a>
       </div>
       <div class="footer-text" style="margin-top: 8px;">
         Built for the Colosseum Agent Hackathon &middot; persistence-agent-identity

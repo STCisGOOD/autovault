@@ -1,7 +1,7 @@
 /**
- * AutoVault Reputation System
+ * Synap-AI Reputation System
  *
- * Forked pattern from AgentRep, adapted for AutoVault's use case.
+ * Forked pattern from AgentRep, adapted for Synap-AI's use case.
  * Reputation calculated from SOLPRISM reasoning traces.
  *
  * Formula (adapted from AgentRep):

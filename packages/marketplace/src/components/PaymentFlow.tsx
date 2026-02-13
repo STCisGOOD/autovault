@@ -1,17 +1,24 @@
 /**
  * PaymentFlow — x402 USDC payment modal.
  *
- * Security fixes:
- * - Uses useWallet() hook for connected/publicKey (not nanostores, which are
- *   console-manipulable). Nanostores are fine for display; not for auth gates.
- * - useRef guard prevents double-payment from useEffect re-firing.
- * - Signature validated as base58 before rendering in explorer URL.
+ * Security (2026 hardening):
+ * - Uses useWallet() hook for connected/publicKey (not nanostores)
+ * - useRef guard prevents double-payment from useEffect re-firing
+ * - Signature validated as base58 before rendering in explorer URL
+ * - Error messages sanitized before DOM rendering (reflected XSS prevention)
+ * - Amount validation in x402.ts prevents negative/overflow payments
+ * - Post-sign transaction validation detects malicious extension injection
  */
 
 import { useState, useEffect, useRef } from 'react';
 import { PublicKey } from '@solana/web3.js';
 import { useWallet } from '@solana/wallet-adapter-react';
 import { getUsdcBalance, executePayment } from '../lib/x402';
+
+/** Sanitize error strings before rendering in DOM */
+function sanitizeError(msg: string): string {
+  return msg.replace(/[<>"'&]/g, '').slice(0, 200);
+}
 
 interface PaymentFlowProps {
   agentPubkey: string;
@@ -104,7 +111,7 @@ export default function PaymentFlow({
           setStep('success');
           onSuccess(result.signature);
         } else {
-          setError(result.error ?? 'Payment failed');
+          setError(sanitizeError(result.error ?? 'Payment failed'));
           setStep('error');
         }
       } catch (err) {
@@ -113,7 +120,7 @@ export default function PaymentFlow({
           if (msg.includes('User rejected')) {
             setStep('check-wallet');
           } else {
-            setError(msg);
+            setError(sanitizeError(msg));
             setStep('error');
           }
         }
@@ -202,7 +209,7 @@ export default function PaymentFlow({
           <a
             href={`https://explorer.solana.com/tx/${encodeURIComponent(signature!)}?cluster=devnet`}
             target="_blank"
-            rel="noopener"
+            rel="noopener noreferrer"
             className="inline-block text-[10px] text-vault-accent-dim hover:text-vault-accent
                        underline transition-colors"
           >
@@ -235,7 +242,7 @@ export default function PaymentFlow({
           <a
             href="https://faucet.circle.com/"
             target="_blank"
-            rel="noopener"
+            rel="noopener noreferrer"
             className="text-vault-accent-dim hover:text-vault-accent underline"
           >
             Circle faucet

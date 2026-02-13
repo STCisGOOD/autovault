@@ -246,7 +246,7 @@ export default function AgentDetail({ pubkey }: AgentDetailProps) {
           <a
             href={`https://explorer.solana.com/address/${pubkey}?cluster=devnet`}
             target="_blank"
-            rel="noopener"
+            rel="noopener noreferrer"
             className="inline-block px-4 py-1.5 border border-vault-border text-vault-accent-dim
                        hover:text-vault-accent hover:border-vault-accent/40 text-[10px]
                        uppercase tracking-widest transition-colors"

@@ -102,13 +102,20 @@ async function sha256(data: Uint8Array): Promise<Uint8Array> {
 
 /**
  * Check if an agent identity PDA already exists for the given authority.
+ *
+ * Security: Verifies account.owner === PROGRAM_ID (Solana security checklist).
+ * Without this check, any account at the PDA address would pass — an attacker
+ * could theoretically close + recreate an account at the same address owned by
+ * a different program to spoof verification.
  */
 export async function checkAgentExists(authority: PublicKey): Promise<boolean> {
   const connection = getConnection();
   const [pda] = deriveIdentityPDA(authority);
   try {
     const info = await connection.getAccountInfo(pda);
-    return info !== null;
+    if (!info) return false;
+    // Verify the account is owned by our program, not a spoofed account
+    return info.owner.equals(PROGRAM_ID);
   } catch {
     return false;
   }
@@ -157,8 +164,9 @@ export async function buildInitializeTx(authority: PublicKey): Promise<Transacti
   const tx = new Transaction().add(ix);
   tx.feePayer = authority;
 
-  const { blockhash } = await connection.getLatestBlockhash('confirmed');
+  const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
   tx.recentBlockhash = blockhash;
+  tx.lastValidBlockHeight = lastValidBlockHeight;
 
   return tx;
 }

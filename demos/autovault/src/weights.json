@@ -1,7 +1,7 @@
 {
   "version": "0.1.0",
   "lastUpdated": "2026-02-03T17:55:00.000Z",
-  "description": "Explicit decision weights for AutoVault. Updated based on outcome feedback.",
+  "description": "Explicit decision weights for Synap-AI. Updated based on outcome feedback.",
 
   "yieldDecision": {
     "apyWeight": 0.30,

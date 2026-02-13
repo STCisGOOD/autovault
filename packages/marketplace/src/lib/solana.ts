@@ -3,6 +3,16 @@
  *
  * Handles RPC connection, PDA derivation, and on-chain account deserialization.
  * Uses the same constants and layout as the backend AccountTypes.ts.
+ *
+ * Security:
+ * - Single-source RPC_URL exported for all components (no scattered hardcodes)
+ * - Account deserialization validates data length + dimensionCount bounds
+ * - confirmTransaction uses blockhash-based strategy (not deprecated signature-only)
+ * - Account owner verification in all getAccountInfo consumers
+ *
+ * Stack: @solana/web3.js 1.98.4 (legacy, pinned).
+ * Migration path: @solana/kit v6 + @solana/web3-compat boundary adapter.
+ * See: https://solana.com/docs/frontend/web3-compat
  */
 
 import { Connection, PublicKey } from '@solana/web3.js';
@@ -19,16 +29,48 @@ const WEIGHT_SCALE = 10000;
 const DISCRIMINATOR_SIZE = 8;
 const DECL_SIZE = 1 + 8 + 8 + 32 + 64 + 32; // 145
 
+// Minimum expected account data length: discriminator + authority + bump + dim_count +
+// vocab_hash + names + weights + self_model + time + decl_count + ... scores + timestamps
+const MIN_ACCOUNT_DATA_LEN = DISCRIMINATOR_SIZE + 32 + 1 + 1 + 32 +
+  (MAX_DIMENSIONS * MAX_DIMENSION_NAME_LEN) + (MAX_DIMENSIONS * 8 * 2) +
+  8 + 4 + (DECL_SIZE * MAX_STORED_DECLARATIONS) + (32 * 3) + 2 +
+  (32 + 8 + 8) * MAX_PIVOTAL_EXPERIENCES + (8 * 3) + (8 * 2);
+
 // ─── Connection ───────────────────────────────────────────────────────────
 
-const RPC_URL = 'https://api.devnet.solana.com';
+/** Single-source RPC URL — import this everywhere instead of hardcoding. */
+export const RPC_URL = 'https://api.devnet.solana.com';
+
 let _connection: Connection | null = null;
 
 export function getConnection(): Connection {
   if (!_connection) {
-    _connection = new Connection(RPC_URL, 'confirmed');
+    _connection = new Connection(RPC_URL, {
+      commitment: 'confirmed',
+      confirmTransactionInitialTimeout: 30_000,
+    });
   }
   return _connection;
+}
+
+/**
+ * Confirm a transaction using the recommended blockhash-based strategy.
+ * The deprecated signature-only confirmTransaction can hang indefinitely
+ * if the blockhash expires before confirmation.
+ */
+export async function confirmTx(
+  signature: string,
+  blockhash: string,
+  lastValidBlockHeight: number,
+): Promise<void> {
+  const connection = getConnection();
+  const result = await connection.confirmTransaction(
+    { signature, blockhash, lastValidBlockHeight },
+    'confirmed',
+  );
+  if (result.value.err) {
+    throw new Error(`Transaction failed: ${JSON.stringify(result.value.err)}`);
+  }
 }
 
 // ─── PDA Derivation ───────────────────────────────────────────────────────
@@ -96,6 +138,11 @@ function readFixedString(data: Buffer, offset: number, maxLen: number): string {
  */
 export function parseAgentIdentity(data: Buffer): ParsedAgentIdentity | null {
   try {
+    // Validate minimum data length before parsing to prevent OOB reads
+    if (!data || data.length < MIN_ACCOUNT_DATA_LEN) {
+      return null;
+    }
+
     let offset = DISCRIMINATOR_SIZE; // Skip Anchor discriminator
 
     // authority: Pubkey (32 bytes)
@@ -106,9 +153,10 @@ export function parseAgentIdentity(data: Buffer): ParsedAgentIdentity | null {
     const bump = readU8(data, offset);
     offset += 1;
 
-    // dimension_count: u8
+    // dimension_count: u8 (must be <= MAX_DIMENSIONS to prevent OOB)
     const dimensionCount = readU8(data, offset);
     offset += 1;
+    if (dimensionCount > MAX_DIMENSIONS) return null;
 
     // vocabulary_hash: [u8; 32]
     offset += 32; // skip

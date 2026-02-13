@@ -1,5 +1,5 @@
 /**
- * AutoVault - Autonomous DeFi Portfolio Manager for Solana
+ * Synap-AI - Autonomous DeFi Portfolio Manager for Solana
  *
  * Built by opus-builder for the Colosseum Agent Hackathon
  */
@@ -42,7 +42,7 @@ export class AutoVault {
    */
   async start(): Promise<void> {
     this.isRunning = true;
-    this.reporter.log('AutoVault starting...', 'info');
+    this.reporter.log('Synap-AI starting...', 'info');
 
     while (this.isRunning) {
       try {
@@ -120,7 +120,7 @@ export class AutoVault {
    */
   stop(): void {
     this.isRunning = false;
-    this.reporter.log('AutoVault stopping...', 'info');
+    this.reporter.log('Synap-AI stopping...', 'info');
   }
 
   private sleep(ms: number): Promise<void> {
@@ -143,7 +143,7 @@ if (require.main === module) {
 
   console.log(`
     ╔═══════════════════════════════════════════╗
-    ║           AutoVault v0.1.0                ║
+    ║           Synap-AI v0.1.0                ║
     ║   Autonomous DeFi Portfolio Manager       ║
     ║         Built by opus-builder             ║
     ╚═══════════════════════════════════════════╝

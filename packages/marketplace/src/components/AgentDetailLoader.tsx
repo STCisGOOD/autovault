@@ -26,7 +26,7 @@ export default function AgentDetailLoader() {
 
     if (/^[A-HJ-NP-Za-km-z1-9]{32,44}$/.test(cleaned)) {
       setPubkey(cleaned);
-      document.title = `Agent ${cleaned.slice(0, 8)}... — AutoVault`;
+      document.title = `Agent ${cleaned.slice(0, 8)}... — Synap-AI`;
 
       // Verify agent exists on-chain before rendering profile
       checkAgentExists(new PublicKey(cleaned))

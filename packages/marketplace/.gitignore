@@ -3,3 +3,4 @@ dist/
 .astro/
 *.html
 google-fonts.css
+.vercel

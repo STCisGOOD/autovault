@@ -1,5 +1,5 @@
 /**
- * AutoVault Heartbeat System
+ * Synap-AI Heartbeat System
  *
  * Forked pattern from Ace-Strategist's "Ghost in the Machine" concept.
  * Heartbeats prove the agent is running and accountable.

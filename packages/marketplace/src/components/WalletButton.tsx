@@ -3,22 +3,25 @@
  *
  * Wraps the @solana/wallet-adapter-react-ui button with
  * our dark theme styling and nanostores state sync.
+ *
+ * Security (2026 hardening):
+ * - Uses centralized RPC_URL from solana.ts (no hardcoded duplicates)
+ * - Empty wallets array: Wallet Standard auto-detects installed wallets
+ *   (Phantom, Solflare, Backpack, etc.) — no need for manual adapters
  */
 
-import { useEffect, useMemo } from 'react';
+import { useEffect } from 'react';
 import {
   ConnectionProvider,
   WalletProvider,
   useWallet,
 } from '@solana/wallet-adapter-react';
 import { WalletModalProvider, WalletMultiButton } from '@solana/wallet-adapter-react-ui';
-import { PhantomWalletAdapter } from '@solana/wallet-adapter-wallets';
 import { setWalletState } from '../stores/wallet';
+import { RPC_URL } from '../lib/solana';
 
 // Import wallet adapter CSS
 import '@solana/wallet-adapter-react-ui/styles.css';
-
-const RPC_URL = 'https://api.devnet.solana.com';
 
 /** Syncs wallet adapter state to nanostores */
 function WalletStateSync() {
@@ -56,7 +59,9 @@ function WalletButtonInner() {
 
 /** Top-level provider wrapper — include this once near the root */
 export default function WalletButton() {
-  const wallets = useMemo(() => [new PhantomWalletAdapter()], []);
+  // Empty array: Wallet Standard auto-detects installed wallets.
+  // Manual adapters (PhantomWalletAdapter) are legacy and unnecessary since 2024.
+  const wallets: never[] = [];
 
   return (
     <ConnectionProvider endpoint={RPC_URL}>

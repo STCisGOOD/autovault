@@ -1,5 +1,5 @@
 /**
- * AutoVault Learning System
+ * Synap-AI Learning System
  *
  * This is the missing layer: feedback that modifies future decisions.
  *
